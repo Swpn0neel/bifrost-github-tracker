@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK"
+  },
+  "deploy": {
+    "startCommand": "npm run collect",
+    "cronSchedule": "30 0,6,12,18 * * *",
+    "restartPolicyType": "NEVER"
+  }
+}

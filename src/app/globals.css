@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+/* Chart chrome + validated palette (see dataviz reference). Light first, dark below. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --good: #006300;
+  --bad: #d03b3b;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-gray: #c3c2b7;
+  /* ordinal blue ramp for the four daily windows (12 AM -> 6 PM) */
+  --ord-1: #86b6ef;
+  --ord-2: #5598e7;
+  --ord-3: #2a78d6;
+  --ord-4: #184f95;
+  /* sequential blue for heatmaps: 1 = near zero, 7 = max */
+  --seq-1: #cde2fb; --seq-1-ink: #0b0b0b;
+  --seq-2: #9ec5f4; --seq-2-ink: #0b0b0b;
+  --seq-3: #6da7ec; --seq-3-ink: #0b0b0b;
+  --seq-4: #3987e5; --seq-4-ink: #ffffff;
+  --seq-5: #256abf; --seq-5-ink: #ffffff;
+  --seq-6: #184f95; --seq-6-ink: #ffffff;
+  --seq-7: #0d366b; --seq-7-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --good: #0ca30c;
+    --bad: #e66767;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-gray: #52514e;
+    --ord-1: #9ec5f4;
+    --ord-2: #6da7ec;
+    --ord-3: #3987e5;
+    --ord-4: #1c5cab;
+    /* dark flips the anchor: near-zero recedes into the dark surface */
+    --seq-1: #0d366b; --seq-1-ink: #ffffff;
+    --seq-2: #184f95; --seq-2-ink: #ffffff;
+    --seq-3: #256abf; --seq-3-ink: #ffffff;
+    --seq-4: #3987e5; --seq-4-ink: #ffffff;
+    --seq-5: #6da7ec; --seq-5-ink: #0b0b0b;
+    --seq-6: #9ec5f4; --seq-6-ink: #0b0b0b;
+    --seq-7: #cde2fb; --seq-7-ink: #0b0b0b;
+  }
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface-1);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-muted: var(--muted);
+  --color-line: var(--border);
+  --color-grid: var(--grid);
+  --color-axis: var(--axis);
+  --color-good: var(--good);
+  --color-bad: var(--bad);
+  --color-accent: var(--series-1);
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.heat-0 { background: transparent; color: var(--muted); }
+.heat-1 { background: var(--seq-1); color: var(--seq-1-ink); }
+.heat-2 { background: var(--seq-2); color: var(--seq-2-ink); }
+.heat-3 { background: var(--seq-3); color: var(--seq-3-ink); }
+.heat-4 { background: var(--seq-4); color: var(--seq-4-ink); }
+.heat-5 { background: var(--seq-5); color: var(--seq-5-ink); }
+.heat-6 { background: var(--seq-6); color: var(--seq-6-ink); }
+.heat-7 { background: var(--seq-7); color: var(--seq-7-ink); }
