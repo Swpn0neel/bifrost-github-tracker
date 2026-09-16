@@ -34,20 +34,25 @@ The GitHub token only needs public read access. Without it the collector still s
 
 ## Railway deployment
 
-Two services from the same repo share one Neon database:
+Live at https://web-production-a47d1.up.railway.app (project `bifrost-github-tracker`). Two services from the same repo share one Neon database:
 
-| Service | Config file | What it does |
+| Service | Settings | What it does |
 |---|---|---|
-| `web` | `railway.json` (default) | `next start`; health check on `/api/health` |
-| `collector` | `railway.collector.json` | cron `30 0,6,12,18 * * *` UTC = 6 AM, 12 PM, 6 PM, 12 AM IST; runs `npm run collect` and exits |
+| `web` | default build, `railway.json` health check on `/api/health`, public domain with target port 8080 | `next start`; Railway injects `PORT` (8080), which Next honours |
+| `collector` | Custom start command `npm run collect`, cron schedule `30 0,6,12,18 * * *` (UTC = 6 AM, 12 PM, 6 PM, 12 AM IST) | one snapshot + incremental sync per run, then exits |
 
-1. Create a Railway project and add a service from this GitHub repo. That is the `web` service.
-2. Add a second service from the same repo. In its settings set **Config-as-code → Config file path** to `railway.collector.json` (or set the cron schedule and start command by hand).
-3. Set the same variables on both services: `DATABASE_URL`, `GITHUB_TOKEN`, `GITHUB_REPO`, `DASHBOARD_PASSWORD`, `SESSION_SECRET`, `COLLECT_SECRET`. Railway's shared variables or a variable reference (`${{web.DATABASE_URL}}`) keeps them in one place.
-4. Generate a public domain for `web`. Open it, sign in with `DASHBOARD_PASSWORD`, and press **Refresh now** to take the first snapshot.
-5. Run the backfill once from your machine (`npm run backfill`) or from a one-off Railway shell.
+Railway's config-as-code files are deprecated, so the collector's start command and cron schedule live in the service settings UI rather than a JSON file.
 
-`POST /api/collect` with `Authorization: Bearer $COLLECT_SECRET` triggers a snapshot from anywhere (a second cron, a webhook, a script).
+Variables: `web` holds `DATABASE_URL`, `GITHUB_TOKEN`, `GITHUB_REPO`, `DASHBOARD_PASSWORD`, `SESSION_SECRET`, `COLLECT_SECRET`. `collector` references them (`DATABASE_URL=${{web.DATABASE_URL}}` etc.) so secrets are entered once.
+
+To reproduce from scratch:
+
+1. New project → GitHub repository → this repo (the Railway GitHub App must have access to it). Rename the service `web`, paste the variables into its Raw Editor, generate a domain.
+2. Add a second service from the same repo, name it `collector`, set the start command and cron schedule above, and add the three `${{web.*}}` references.
+3. Deploy. Open the domain, sign in with `DASHBOARD_PASSWORD`, press **Refresh now** for the first snapshot.
+4. Run the history backfill once (`npm run backfill` locally with `GITHUB_TOKEN` set, or from the collector's Railway shell).
+
+`POST /api/collect` with `Authorization: Bearer $COLLECT_SECRET` triggers a snapshot from anywhere.
 
 ## Layout
 
