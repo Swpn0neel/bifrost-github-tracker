@@ -35,7 +35,7 @@ The GitHub token only needs public read access (a fine-grained token with "Publi
 
 ## Railway deployment
 
-Live at https://web-production-a47d1.up.railway.app (project `bifrost-github-tracker`). Two services from the same repo share one Neon database:
+Live at https://bifrost-gh-tracker.up.railway.app (project `bifrost-github-tracker`). Two services from the same repo share one Neon database:
 
 | Service | Settings | What it does |
 |---|---|---|
