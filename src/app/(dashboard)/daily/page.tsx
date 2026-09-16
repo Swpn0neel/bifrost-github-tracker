@@ -21,7 +21,12 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
     series.map((p) => p.new_stars),
     7,
   );
-  const rows = series.map((p, i) => ({ ...p, avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10 }));
+  const rows = series.map((p, i) => ({
+    ...p,
+    // Without star events, reconstructed days have no real star total to plot.
+    stars: starEvents || p.source === "snapshot" ? p.stars : null,
+    avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10,
+  }));
   const reconstructedDays = series.filter((p) => p.source === "reconstructed").length;
 
   const totals = {

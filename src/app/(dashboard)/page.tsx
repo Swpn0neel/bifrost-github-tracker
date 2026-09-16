@@ -34,18 +34,20 @@ export default async function OverviewPage() {
   const hasData = latest !== null || series.some((p) => p.stars > 0 || p.commits_total > 0);
 
   const stars = latest?.stars ?? cur.stars;
-  const gain7 = stars - week.stars;
-  const gain30 = stars - month.stars;
-  const perDay7 = gain7 / 7;
+  // Without star events, days before the first snapshot carry no real star total.
+  const trusted = (p: DailyPoint) => starEvents || p.source === "snapshot";
+  const gain7 = trusted(week) ? stars - week.stars : null;
+  const gain30 = trusted(month) ? stars - month.stars : null;
+  const perDay7 = gain7 === null ? null : gain7 / 7;
   const milestone = Math.ceil((stars + 1) / 1000) * 1000;
-  const etaDays = perDay7 > 0 ? Math.ceil((milestone - stars) / perDay7) : null;
+  const etaDays = perDay7 !== null && perDay7 > 0 ? Math.ceil((milestone - stars) / perDay7) : null;
 
   const avg7 = rollingMean(
     series.map((p) => p.new_stars),
     7,
   );
   const newStarsData = series.map((p, i) => ({ date: p.date, new_stars: p.new_stars, avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10 }));
-  const totalsData = series.map((p) => ({ date: p.date, stars: p.stars }));
+  const totalsData = series.map((p) => ({ date: p.date, stars: trusted(p) ? p.stars : null }));
 
   const thisWeek = series.slice(-7);
   const lastWeek = series.slice(-14, -7);
@@ -75,7 +77,7 @@ export default async function OverviewPage() {
           delta={yday ? stars - yday.stars : null}
           deltaLabel="today so far"
           upIsGood
-          trend={series.slice(-14).map((p) => p.stars)}
+          trend={series.slice(-14).filter(trusted).map((p) => p.stars)}
           hint={`${signed(gain7)} in 7 d · ${signed(gain30)} in 30 d`}
         />
         <StatTile label="Forks" value={latest?.forks ?? cur.forks} delta={yday ? (latest?.forks ?? cur.forks) - yday.forks : null} deltaLabel="today" upIsGood />
@@ -106,7 +108,7 @@ export default async function OverviewPage() {
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <dt className="text-xs text-ink-2">Stars per day</dt>
-              <dd className="text-xl font-semibold text-ink">{perDay7.toFixed(1)}</dd>
+              <dd className="text-xl font-semibold text-ink">{perDay7 === null ? "—" : perDay7.toFixed(1)}</dd>
             </div>
             <div>
               <dt className="text-xs text-ink-2">Next milestone</dt>
