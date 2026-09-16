@@ -65,6 +65,8 @@ export class GitHubClient {
   calls = 0;
   rateRemaining: number | null = null;
   rateReset: Date | null = null;
+  /** Set when GitHub rejects the configured token; requests continue anonymously. */
+  tokenRejected = false;
   readonly owner: string;
   readonly name: string;
 
@@ -76,7 +78,7 @@ export class GitHubClient {
   }
 
   get hasToken(): boolean {
-    return Boolean(this.opts.token);
+    return Boolean(this.opts.token) && !this.tokenRejected;
   }
 
   repoPath(sub = ""): string {
@@ -93,12 +95,21 @@ export class GitHubClient {
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "bifrost-github-tracker",
     };
-    if (this.opts.token) headers.Authorization = `Bearer ${this.opts.token}`;
+    if (this.hasToken) headers.Authorization = `Bearer ${this.opts.token}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
 
     for (let attempt = 1; ; attempt++) {
       this.calls++;
       const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+
+      // A revoked or mistyped token would otherwise kill every run; fall back to
+      // anonymous access (60 req/hr) so the headline snapshot still gets taken.
+      if (res.status === 401 && this.hasToken) {
+        this.tokenRejected = true;
+        delete headers.Authorization;
+        this.opts.log?.("GitHub rejected GITHUB_TOKEN (401 Bad credentials); continuing unauthenticated at 60 req/hr");
+        continue;
+      }
       const remaining = res.headers.get("x-ratelimit-remaining");
       if (remaining !== null) this.rateRemaining = Number(remaining);
       const reset = res.headers.get("x-ratelimit-reset");
