@@ -3,7 +3,7 @@ import { DataTable } from "@/components/DataTable";
 import { StatTile } from "@/components/StatTile";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { formatInt, signed } from "@/lib/format";
-import { dailySeries, firstSnapshot, latestSnapshot, type DailyPoint } from "@/lib/queries";
+import { dailySeries, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
 import { rollingMean, sumBy } from "@/lib/stats";
 import { addDays, formatDate, formatIstDateTime, istDate } from "@/lib/time";
 
@@ -24,7 +24,7 @@ const WEEK_ROWS: { key: keyof DailyPoint; label: string }[] = [
 export default async function OverviewPage() {
   const today = istDate();
   const from = addDays(today, -30);
-  const [latest, series, first] = await Promise.all([latestSnapshot(), dailySeries(from, today), firstSnapshot()]);
+  const [latest, series, first, starEvents] = await Promise.all([latestSnapshot(), dailySeries(from, today), firstSnapshot(), hasStarEvents()]);
 
   const n = series.length;
   const cur = series[n - 1];
@@ -87,14 +87,14 @@ export default async function OverviewPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Stars, last 30 days" subtitle={first ? `Snapshots since ${formatDate(first.ist_date)}; earlier days reconstructed from star timestamps` : "Reconstructed from star timestamps"}>
+        <Card title="Stars, last 30 days" subtitle={first ? `Snapshots since ${formatDate(first.ist_date)}${starEvents ? "; earlier days reconstructed from star timestamps" : "; no star history before that (GitHub does not expose the stargazer list to this token)"}` : "No snapshots yet"}>
           <TimeSeriesChart data={totalsData} series={[{ key: "stars", label: "Stars", color: "var(--series-1)", type: "area" }]} zeroBased={false} />
         </Card>
-        <Card title="New stars per day" subtitle="Gross new stars by IST calendar day, with a trailing 7-day average">
+        <Card title="New stars per day" subtitle={starEvents ? "Gross new stars by IST calendar day, with a trailing 7-day average" : `Net change between daily snapshots, with a trailing 7-day average. GitHub does not expose the stargazer list to this token, so star gains are the net change between snapshots.`}>
           <TimeSeriesChart
             data={newStarsData}
             series={[
-              { key: "new_stars", label: "New stars", color: "var(--series-1)", type: "bar" },
+              { key: "new_stars", label: starEvents ? "New stars" : "Net new stars", color: "var(--series-1)", type: "bar" },
               { key: "avg7", label: "7-day average", color: "var(--series-gray)", type: "line" },
             ]}
           />

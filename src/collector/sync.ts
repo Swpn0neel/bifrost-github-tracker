@@ -1,4 +1,4 @@
-import { GitHubClient, type RepoInfo } from "../lib/github";
+import { GitHubClient, GitHubError, type RepoInfo } from "../lib/github";
 import { query, queryOne } from "../lib/db";
 
 export type Log = (msg: string) => void;
@@ -159,6 +159,23 @@ const STAR_COLUMNS = ["login", "starred_at", "unstarred_at"];
  */
 export async function syncStargazers(gh: GitHubClient, log: Log, full: boolean): Promise<number> {
   const path = gh.repoPath("/stargazers");
+  // GitHub only exposes a repo's stargazer list to tokens with collaborator access
+  // to that repo; everyone else gets 404/403. Detect it once, then skip quietly.
+  if ((await getState("stargazers_unavailable")) === "true" && !full) {
+    log("stargazers: skipped (list not available to this token)");
+    return 0;
+  }
+  try {
+    await gh.request<unknown[]>(path, { params: { per_page: 1 }, accept: STAR_ACCEPT });
+    await setState("stargazers_unavailable", "false");
+  } catch (err) {
+    if (err instanceof GitHubError && (err.status === 403 || err.status === 404)) {
+      await setState("stargazers_unavailable", "true");
+      log(`stargazers: list not available to this token (HTTP ${err.status}); star gains will come from snapshot deltas`);
+      return 0;
+    }
+    throw err;
+  }
   if (full) {
     const seen: string[] = [];
     for await (const { page, items, lastPage } of gh.pages<StarItem>(path, { accept: STAR_ACCEPT })) {

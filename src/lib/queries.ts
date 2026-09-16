@@ -43,6 +43,12 @@ export function firstSnapshot(): Promise<SnapshotRow | null> {
   return queryOne<SnapshotRow>(`SELECT ${SNAPSHOT_COLS} FROM snapshots s ORDER BY s.captured_at ASC LIMIT 1`);
 }
 
+/** True when the stargazers table has rows, i.e. GitHub let this token list stars. */
+export async function hasStarEvents(): Promise<boolean> {
+  const row = await queryOne<{ n: number }>("SELECT count(*)::int AS n FROM stargazers");
+  return (row?.n ?? 0) > 0;
+}
+
 /** Earliest IST date we have any data for (events or snapshots). */
 export async function dataStartDate(): Promise<string> {
   const row = await queryOne<{ d: string | null }>(
@@ -255,10 +261,11 @@ export interface DailyPoint extends DailyActivity, Totals {
  * the two sources join without a visible step.
  */
 export async function dailySeries(from: string, to: string): Promise<DailyPoint[]> {
-  const [activity, closes, base] = await Promise.all([
+  const [activity, closes, base, starEvents] = await Promise.all([
     dailyActivity(from, to),
     dayCloseSnapshots(from, to),
     totalsAt(istMidnightUtc(from)),
+    hasStarEvents(),
   ]);
   const closeByDate = new Map(closes.map((c) => [c.date, c]));
 
@@ -275,7 +282,7 @@ export async function dailySeries(from: string, to: string): Promise<DailyPoint[
   });
   let offset = offsets.find((o) => o !== null) ?? ZERO_TOTALS;
 
-  return activity.map((a, i) => {
+  const points: DailyPoint[] = activity.map((a, i) => {
     const s = closeByDate.get(a.date);
     if (s) {
       offset = offsets[i] ?? offset;
@@ -297,6 +304,21 @@ export async function dailySeries(from: string, to: string): Promise<DailyPoint[
       snapshot_at: null,
     };
   });
+
+  // Without a stargazer list, the only star signal is the net change between
+  // consecutive daily snapshots.
+  if (!starEvents) {
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      const prev = points[i - 1];
+      if (p.source === "snapshot" && prev.source === "snapshot") {
+        const diff = p.stars - prev.stars;
+        p.new_stars = Math.max(diff, 0);
+        p.unstars = Math.max(-diff, 0);
+      }
+    }
+  }
+  return points;
 }
 
 // ---------------------------------------------------------------------------
@@ -337,22 +359,32 @@ export interface SlotPoint extends SlotActivity {
 }
 
 export async function slotSeries(from: string, to: string): Promise<SlotPoint[]> {
-  const [activity, snaps] = await Promise.all([slotActivity(from, to), slotSnapshots(from, addDays(to, 1))]);
+  const [activity, snaps, starEvents] = await Promise.all([
+    slotActivity(from, to),
+    slotSnapshots(from, addDays(to, 1)),
+    hasStarEvents(),
+  ]);
   const byKey = new Map(snaps.map((s) => [`${s.date}:${s.slot}`, s]));
   const nextKey = (date: string, slot: Slot) => (slot === 18 ? `${addDays(date, 1)}:0` : `${date}:${slot + 6}`);
   return activity.map((a) => {
     const here = byKey.get(`${a.date}:${a.slot}`);
     const next = byKey.get(nextKey(a.date, a.slot));
-    return {
+    const net_stars = here && next ? next.stars - here.stars : null;
+    const point: SlotPoint = {
       ...a,
       stars_at: here?.stars ?? null,
       forks_at: here?.forks ?? null,
       open_issues_at: here?.open_issues ?? null,
       open_prs_at: here?.open_prs ?? null,
-      net_stars: here && next ? next.stars - here.stars : null,
+      net_stars,
       net_forks: here && next ? next.forks - here.forks : null,
       captured_at: here ? here.captured_at.toISOString() : null,
     };
+    if (!starEvents && net_stars !== null) {
+      point.new_stars = Math.max(net_stars, 0);
+      point.unstars = Math.max(-net_stars, 0);
+    }
+    return point;
   });
 }
 

@@ -5,7 +5,7 @@ import { RangeFilter } from "@/components/RangeFilter";
 import { StatTile } from "@/components/StatTile";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { fixed, formatInt, pct, signed } from "@/lib/format";
-import { dataStartDate, slotSeries, slotWeekdayCounts, type HeatmapMetric, type SlotPoint } from "@/lib/queries";
+import { dataStartDate, hasStarEvents, slotSeries, slotWeekdayCounts, type HeatmapMetric, type SlotPoint } from "@/lib/queries";
 import { resolveRange, type SearchParams } from "@/lib/range";
 import { addDays, formatDate, formatIstDateTime, SLOT_LABELS, SLOT_WINDOWS, SLOTS, WEEKDAY_LABELS, weekday, type Slot } from "@/lib/time";
 
@@ -20,6 +20,7 @@ const METRICS: Record<HeatmapMetric, { key: keyof SlotPoint; label: string; netK
 };
 
 const ORD = ["var(--ord-1)", "var(--ord-2)", "var(--ord-3)", "var(--ord-4)"];
+const STAR_NOTE_SHORT = "GitHub does not expose the stargazer list to this token";
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 function pickMetric(v: string | string[] | undefined): HeatmapMetric {
@@ -33,7 +34,8 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
   const m = METRICS[metric];
   const dataStart = await dataStartDate();
   const range = resolveRange(sp, dataStart, "30d");
-  const [points, heat] = await Promise.all([slotSeries(range.from, range.to), slotWeekdayCounts(range.from, range.to, metric)]);
+  const [points, heat, starEvents] = await Promise.all([slotSeries(range.from, range.to), slotWeekdayCounts(range.from, range.to, metric), hasStarEvents()]);
+  const starsFromSnapshots = metric === "stars" && !starEvents;
 
   const value = (p: SlotPoint) => Number(p[m.key] ?? 0);
 
@@ -58,6 +60,15 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
   const occurrences = new Array<number>(7).fill(0);
   for (let d = range.from; d <= range.to; d = addDays(d, 1)) occurrences[weekday(d)]++;
   const heatIndex = new Map(heat.map((h) => [`${h.dow}:${h.slot}`, h.n]));
+  if (starsFromSnapshots) {
+    // No star events: aggregate the net change between consecutive snapshots instead.
+    heatIndex.clear();
+    for (const p of points) {
+      if (p.net_stars === null || p.net_stars <= 0) continue;
+      const key = `${weekday(p.date)}:${p.slot}`;
+      heatIndex.set(key, (heatIndex.get(key) ?? 0) + p.net_stars);
+    }
+  }
   const heatValues = WEEKDAY_ORDER.map((dow) =>
     SLOTS.map((slot) => (occurrences[dow] ? (heatIndex.get(`${dow}:${slot}`) ?? 0) / occurrences[dow] : null)),
   );
@@ -98,6 +109,7 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
         <p className="text-xs text-ink-2">
           Each day split into the four collector windows (IST). Bars count events with a timestamp inside the window; the net change between
           consecutive snapshots is in the table.
+          {starsFromSnapshots && ` For stars, gains are the net change between snapshots: ${STAR_NOTE_SHORT}.`}
         </p>
       </div>
       <RangeFilter range={range} basePath="/quarters" extra={{ metric }} />

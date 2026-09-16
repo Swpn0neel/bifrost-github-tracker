@@ -4,7 +4,7 @@ import { RangeFilter } from "@/components/RangeFilter";
 import { StatTile } from "@/components/StatTile";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { formatInt } from "@/lib/format";
-import { dailySeries, dataStartDate, firstSnapshot } from "@/lib/queries";
+import { dailySeries, dataStartDate, firstSnapshot, hasStarEvents } from "@/lib/queries";
 import { resolveRange, type SearchParams } from "@/lib/range";
 import { rollingMean, sumBy } from "@/lib/stats";
 import { formatDate } from "@/lib/time";
@@ -15,7 +15,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const dataStart = await dataStartDate();
   const range = resolveRange(sp, dataStart, "30d");
-  const [series, first] = await Promise.all([dailySeries(range.from, range.to), firstSnapshot()]);
+  const [series, first, starEvents] = await Promise.all([dailySeries(range.from, range.to), firstSnapshot(), hasStarEvents()]);
 
   const avg7 = rollingMean(
     series.map((p) => p.new_stars),
@@ -48,7 +48,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
       <RangeFilter range={range} basePath="/daily" />
 
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatTile label="New stars" value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} unstarred` : undefined} />
+        <StatTile label={starEvents ? "New stars" : "Net new stars"} value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} ${starEvents ? "unstarred" : "lost"}` : starEvents ? undefined : "From snapshot deltas"} />
         <StatTile label="New forks" value={totals.forks} />
         <StatTile label="Issues opened / closed" valueText={`${formatInt(totals.issuesOpened)} / ${formatInt(totals.issuesClosed)}`} value={null} />
         <StatTile label="PRs opened / merged" valueText={`${formatInt(totals.prsOpened)} / ${formatInt(totals.prsMerged)}`} value={null} />
@@ -60,11 +60,11 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
         <Card title="Stars" subtitle="Total at end of day">
           <TimeSeriesChart data={rows} series={[{ key: "stars", label: "Stars", color: "var(--series-1)", type: "area" }]} zeroBased={false} />
         </Card>
-        <Card title="New stars per day" subtitle="With trailing 7-day average">
+        <Card title="New stars per day" subtitle={starEvents ? "With trailing 7-day average" : `Net change between daily snapshots, with trailing 7-day average. GitHub does not expose the stargazer list to this token, so star gains are the net change between snapshots.`}>
           <TimeSeriesChart
             data={rows}
             series={[
-              { key: "new_stars", label: "New stars", color: "var(--series-1)", type: "bar" },
+              { key: "new_stars", label: starEvents ? "New stars" : "Net new stars", color: "var(--series-1)", type: "bar" },
               { key: "avg7", label: "7-day average", color: "var(--series-gray)", type: "line" },
             ]}
           />
