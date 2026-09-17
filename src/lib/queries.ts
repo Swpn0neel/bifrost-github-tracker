@@ -64,18 +64,19 @@ export async function dataStartDate(): Promise<string> {
 }
 
 /**
- * Only the four cron runs define days and windows. A snapshot counts when the
- * collector CLI took it within the first hour of its window; dashboard refreshes
- * and off-schedule runs (Railway "Run now", a late retry) still update the live
- * numbers but never stand in for a scheduled reading.
+ * A scheduled snapshot is one the collector CLI took within the first hour of its
+ * window. Dashboard refreshes and off-schedule runs (Railway "Run now", a late
+ * retry) still update the live numbers, but they never override a scheduled
+ * reading: windows use scheduled readings only, and a day falls back to other
+ * readings only when it has no scheduled one at all.
  */
 const SCHEDULED = `(s.triggered_by = 'cron'
   AND s.captured_at < timezone('Asia/Kolkata', s.ist_date::timestamp) + make_interval(hours => s.slot) + interval '60 minutes')`;
 
 /**
  * The "close of day" snapshot for each day: the latest scheduled reading from
- * D 6 AM through D+1 12 AM. That is the next day's midnight run when it exists,
- * otherwise the last run of the day itself.
+ * D 6 AM through D+1 12 AM (the next day's midnight run when it exists). A day
+ * without any scheduled reading uses the last snapshot taken on it instead.
  */
 export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRow & { date: string })[]> {
   return query<SnapshotRow & { date: string }>(
@@ -83,9 +84,9 @@ export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRo
      SELECT DISTINCT ON (days.d) days.d::text AS date, ${SNAPSHOT_COLS}
      FROM days
      JOIN snapshots s
-       ON ${SCHEDULED}
-      AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0))
-     ORDER BY days.d, s.ist_date DESC, s.slot DESC, s.captured_at ASC`,
+       ON (${SCHEDULED} AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0)))
+       OR (NOT ${SCHEDULED} AND s.ist_date = days.d)
+     ORDER BY days.d, ${SCHEDULED} DESC, s.ist_date DESC, s.slot DESC, s.captured_at DESC`,
     [from, to],
   );
 }
