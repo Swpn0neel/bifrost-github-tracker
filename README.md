@@ -12,7 +12,7 @@ Internal dashboard that snapshots `maximhq/bifrost` on GitHub four times a day (
 ## How the numbers are defined
 
 - **Snapshot**: the collector's reading of the headline counts (stars, forks, watchers, open/closed issues, open/merged/closed PRs, contributors, commits on the default branch, releases, discussions). One row per run.
-- **Scheduled snapshot**: one taken by the cron collector (`npm run collect`) within the first hour of its window. Only these define days and windows. The dashboard's **Refresh now** button (and `POST /api/collect`, or an off-schedule Railway "Run now") also stores a snapshot and syncs events, which updates the live numbers, but it never overrides a scheduled reading, so clicking it cannot skew the 12 AM / 6 AM / 12 PM / 6 PM series. Refresh is refused while another run is still in progress.
+- **Scheduled snapshot**: one taken by the cron collector (`npm run collect`) within the first hour of its window. Only these define days and windows. The dashboard's **Refresh now** button (and `POST /api/refresh`, or an off-schedule Railway "Run now") also stores a snapshot and syncs events, which updates the live numbers, but it never overrides a scheduled reading, so clicking it cannot skew the 12 AM / 6 AM / 12 PM / 6 PM series. Refresh is refused while another run is still in progress.
 - **Daily value**: the last scheduled snapshot of the day, i.e. the next day's 12 AM run, or the latest earlier scheduled run that day if the midnight one is missing. Only a day with no scheduled snapshot at all falls back to the last snapshot taken on it.
 - **Quarter / window**: `12 AM–6 AM`, `6 AM–12 PM`, `12 PM–6 PM`, `6 PM–12 AM` IST. Gross activity in a window counts events (stars, forks, issues, PRs, commits) whose GitHub timestamp falls inside it. Net change is the difference between the scheduled snapshots at the start and end of the window; a window whose scheduled run is missing shows no net change.
 - **Reconstructed history**: before the first snapshot, totals are rebuilt from event timestamps (`created_at`, `closed_at`, `merged_at`, …) and anchored to the first real snapshot.
@@ -54,7 +54,7 @@ To reproduce from scratch:
 3. Deploy. Open the domain, sign in with `DASHBOARD_PASSWORD`, press **Refresh now** for the first snapshot.
 4. Run the history backfill once (`npm run backfill` locally with `GITHUB_TOKEN` set, or from the collector's Railway shell).
 
-`POST /api/collect` with `Authorization: Bearer $COLLECT_SECRET` triggers a snapshot from anywhere.
+`POST /api/refresh` with `Authorization: Bearer $COLLECT_SECRET` triggers a snapshot from anywhere. (It is not called `/api/collect` because EasyPrivacy, on by default in uBlock Origin, Brave and AdGuard, blocks fetches to any URL ending in `/api/collect`, which made the button fail with "Failed to fetch".)
 
 ## Layout
 

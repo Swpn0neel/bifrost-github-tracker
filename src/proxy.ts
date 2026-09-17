@@ -8,8 +8,8 @@ export async function proxy(req: NextRequest) {
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return NextResponse.next();
   }
-  // /api/collect authorizes itself (session cookie or bearer secret).
-  if (pathname.startsWith("/api/collect")) return NextResponse.next();
+  // /api/refresh authorizes itself (session cookie or bearer secret).
+  if (pathname.startsWith("/api/refresh")) return NextResponse.next();
 
   if (await isValidSession(req.cookies.get(SESSION_COOKIE)?.value)) {
     return NextResponse.next();

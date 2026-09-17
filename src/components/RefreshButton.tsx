@@ -14,7 +14,7 @@ export function RefreshButton() {
     setState("running");
     setMessage("");
     try {
-      const res = await fetch("/api/collect", { method: "POST" });
+      const res = await fetch("/api/refresh", { method: "POST" });
       const json = (await res.json()) as { status?: string; apiCalls?: number; error?: string; detail?: { syncErrors?: string[] } };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       const warnings = json.detail?.syncErrors?.length ? ` · ${json.detail.syncErrors.length} sync warning(s)` : "";
