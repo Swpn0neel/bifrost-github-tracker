@@ -64,9 +64,18 @@ export async function dataStartDate(): Promise<string> {
 }
 
 /**
- * The "close of day" snapshot for each day: the latest snapshot captured in
- * (D 00:30 IST, D+1 00:30 IST]. That picks the midnight cron run of the next
- * day when it exists, otherwise the last run of the day itself.
+ * Only the four cron runs define days and windows. A snapshot counts when the
+ * collector CLI took it within the first hour of its window; dashboard refreshes
+ * and off-schedule runs (Railway "Run now", a late retry) still update the live
+ * numbers but never stand in for a scheduled reading.
+ */
+const SCHEDULED = `(s.triggered_by = 'cron'
+  AND s.captured_at < timezone('Asia/Kolkata', s.ist_date::timestamp) + make_interval(hours => s.slot) + interval '60 minutes')`;
+
+/**
+ * The "close of day" snapshot for each day: the latest scheduled reading from
+ * D 6 AM through D+1 12 AM. That is the next day's midnight run when it exists,
+ * otherwise the last run of the day itself.
  */
 export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRow & { date: string })[]> {
   return query<SnapshotRow & { date: string }>(
@@ -74,9 +83,9 @@ export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRo
      SELECT DISTINCT ON (days.d) days.d::text AS date, ${SNAPSHOT_COLS}
      FROM days
      JOIN snapshots s
-       ON s.captured_at >  timezone('Asia/Kolkata', days.d::timestamp) + interval '30 minutes'
-      AND s.captured_at <= timezone('Asia/Kolkata', (days.d + 1)::timestamp) + interval '30 minutes'
-     ORDER BY days.d, s.captured_at DESC`,
+       ON ${SCHEDULED}
+      AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0))
+     ORDER BY days.d, s.ist_date DESC, s.slot DESC, s.captured_at ASC`,
     [from, to],
   );
 }
@@ -336,12 +345,12 @@ export interface SlotSnapshot {
   open_prs: number;
 }
 
-/** First snapshot captured inside each 6-hour window (normally the cron run). */
+/** The scheduled reading at the start of each 6-hour window. */
 export function slotSnapshots(from: string, to: string): Promise<SlotSnapshot[]> {
   return query<SlotSnapshot>(
-    `SELECT DISTINCT ON (ist_date, slot) ist_date::text AS date, slot, captured_at, stars, forks, watchers, open_issues, open_prs
-     FROM snapshots WHERE ist_date BETWEEN $1 AND $2
-     ORDER BY ist_date, slot, captured_at ASC`,
+    `SELECT DISTINCT ON (s.ist_date, s.slot) s.ist_date::text AS date, s.slot, s.captured_at, s.stars, s.forks, s.watchers, s.open_issues, s.open_prs
+     FROM snapshots s WHERE s.ist_date BETWEEN $1 AND $2 AND ${SCHEDULED}
+     ORDER BY s.ist_date, s.slot, s.captured_at ASC`,
     [from, to],
   );
 }
@@ -537,6 +546,14 @@ export function collectorRuns(limit = 40): Promise<CollectorRun[]> {
      FROM collector_runs ORDER BY started_at DESC LIMIT $1`,
     [limit],
   );
+}
+
+/** True while a run started in the last 10 minutes has not finished (older stragglers were killed mid-run). */
+export async function runInProgress(): Promise<boolean> {
+  const row = await queryOne<{ n: number }>(
+    "SELECT count(*)::int AS n FROM collector_runs WHERE finished_at IS NULL AND started_at > now() - interval '10 minutes'",
+  );
+  return (row?.n ?? 0) > 0;
 }
 
 export function syncState(): Promise<{ key: string; value: string; updated_at: Date }[]> {

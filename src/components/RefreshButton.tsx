@@ -18,7 +18,7 @@ export function RefreshButton() {
       const json = (await res.json()) as { status?: string; apiCalls?: number; error?: string; detail?: { syncErrors?: string[] } };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       const warnings = json.detail?.syncErrors?.length ? ` · ${json.detail.syncErrors.length} sync warning(s)` : "";
-      setMessage(`Snapshot saved · ${json.apiCalls ?? "?"} API calls${warnings}`);
+      setMessage(`Live numbers updated · ${json.apiCalls ?? "?"} API calls${warnings}`);
       setState("done");
       router.refresh();
     } catch (err) {
@@ -34,6 +34,7 @@ export function RefreshButton() {
         type="button"
         onClick={run}
         disabled={state === "running"}
+        title="Fetch the latest numbers now. Daily and 6-hour window figures only use the scheduled runs at 12 AM, 6 AM, 12 PM and 6 PM IST."
         className="rounded border border-line bg-surface px-2.5 py-1 font-medium text-ink hover:bg-grid disabled:opacity-60"
       >
         {state === "running" ? "Fetching…" : "Refresh now"}

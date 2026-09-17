@@ -88,8 +88,8 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
           const net = m.netKey ? (p[m.netKey] as number | null) : null;
           const at = m.atKey ? (p[m.atKey] as number | null) : null;
           const title = p.captured_at
-            ? `Snapshot ${formatIstDateTime(p.captured_at)}${at !== null ? ` · ${formatInt(at)} at window start` : ""}`
-            : "No snapshot in this window";
+            ? `Scheduled snapshot ${formatIstDateTime(p.captured_at)}${at !== null ? ` · ${formatInt(at)} at window start` : ""}`
+            : "No scheduled snapshot in this window";
           return (
             <span title={title}>
               {formatInt(value(p))}
@@ -108,7 +108,7 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
         <h1 className="text-lg font-semibold text-ink">Quarters</h1>
         <p className="text-xs text-ink-2">
           Each day split into the four collector windows (IST). Bars count events with a timestamp inside the window; the net change between
-          consecutive snapshots is in the table.
+          consecutive scheduled snapshots is in the table (manual refreshes are not counted).
           {starsFromSnapshots && ` For stars, gains are the net change between snapshots: ${STAR_NOTE_SHORT}.`}
         </p>
       </div>

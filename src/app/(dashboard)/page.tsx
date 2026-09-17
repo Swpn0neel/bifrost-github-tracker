@@ -74,7 +74,7 @@ export default async function OverviewPage() {
           label="Stars"
           value={stars}
           hero
-          delta={yday ? stars - yday.stars : null}
+          delta={yday && trusted(yday) ? stars - yday.stars : null}
           deltaLabel="today so far"
           upIsGood
           trend={series.slice(-14).filter(trusted).map((p) => p.stars)}
@@ -124,7 +124,7 @@ export default async function OverviewPage() {
             </div>
           </dl>
           <p className="mt-3 text-xs text-muted">
-            Latest snapshot: {latest ? formatIstDateTime(latest.captured_at) : "none yet"}. Daily values use the last reading before midnight IST.
+            Latest snapshot: {latest ? formatIstDateTime(latest.captured_at) : "none yet"}. Daily values use the scheduled midnight IST reading; Refresh only updates the live numbers.
           </p>
         </Card>
         <Card title="This week vs last week" subtitle="Rolling 7-day windows ending today (IST)">
