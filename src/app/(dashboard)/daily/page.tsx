@@ -1,8 +1,13 @@
+import { ChevronDown, CircleDot, GitCommitHorizontal, GitFork, GitPullRequest, Star, UserPlus } from "lucide-react";
 import { Card } from "@/components/Card";
 import { DataTable } from "@/components/DataTable";
+import { Hint } from "@/components/Hint";
+import { PageHeader } from "@/components/PageHeader";
 import { RangeFilter } from "@/components/RangeFilter";
 import { StatTile } from "@/components/StatTile";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatInt } from "@/lib/format";
 import { dailySeries, dataStartDate, firstSnapshot, hasStarEvents } from "@/lib/queries";
 import { resolveRange, type SearchParams } from "@/lib/range";
@@ -42,26 +47,28 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold text-ink">Daily</h1>
-        <p className="text-xs text-ink-2">
-          One value per IST calendar day. Totals are the last reading before midnight; gains are events with a timestamp inside the day.
-          {reconstructedDays > 0 && first && ` ${reconstructedDays} day(s) before ${formatDate(first.ist_date)} are reconstructed from event timestamps.`}
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Daily"
+        description={
+          <>
+            One value per IST calendar day. Totals are the last reading before midnight; gains are events with a timestamp inside the day.
+            {reconstructedDays > 0 && first && ` ${reconstructedDays} day(s) before ${formatDate(first.ist_date)} are reconstructed from event timestamps.`}
+          </>
+        }
+      />
       <RangeFilter range={range} basePath="/daily" />
 
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <StatTile label={starEvents ? "New stars" : "Net new stars"} value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} ${starEvents ? "unstarred" : "lost"}` : starEvents ? undefined : "From snapshot deltas"} />
-        <StatTile label="New forks" value={totals.forks} />
-        <StatTile label="Issues opened / closed" valueText={`${formatInt(totals.issuesOpened)} / ${formatInt(totals.issuesClosed)}`} value={null} />
-        <StatTile label="PRs opened / merged" valueText={`${formatInt(totals.prsOpened)} / ${formatInt(totals.prsMerged)}`} value={null} />
-        <StatTile label="Commits" value={totals.commits} />
-        <StatTile label="New contributors" value={totals.contributors} />
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-6">
+        <StatTile icon={<Star />} label={starEvents ? "New stars" : "Net new stars"} value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} ${starEvents ? "unstarred" : "lost"}` : starEvents ? undefined : "From snapshot deltas"} />
+        <StatTile icon={<GitFork />} label="New forks" value={totals.forks} />
+        <StatTile icon={<CircleDot />} label="Issues opened / closed" valueText={`${formatInt(totals.issuesOpened)} / ${formatInt(totals.issuesClosed)}`} value={null} />
+        <StatTile icon={<GitPullRequest />} label="PRs opened / merged" valueText={`${formatInt(totals.prsOpened)} / ${formatInt(totals.prsMerged)}`} value={null} />
+        <StatTile icon={<GitCommitHorizontal />} label="Commits" value={totals.commits} />
+        <StatTile icon={<UserPlus />} label="New contributors" value={totals.contributors} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Stars" subtitle="Total at end of day">
           <TimeSeriesChart data={rows} series={[{ key: "stars", label: "Stars", color: "var(--series-1)", type: "area" }]} zeroBased={false} />
         </Card>
@@ -113,15 +120,20 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
       </div>
 
       <Card title="Table view" subtitle="Every value plotted above, newest first">
-        <details>
-          <summary className="cursor-pointer text-xs text-ink-2">Show {series.length} rows</summary>
-          <div className="mt-2">
+        <Collapsible>
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" size="sm" className="group/trigger">
+              Show {series.length} rows
+              <ChevronDown className="transition-transform group-data-[state=open]/trigger:rotate-180" aria-hidden />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3">
             <DataTable
               rows={[...rows].reverse()}
               rowKey={(r) => r.date}
               dense
               columns={[
-                { key: "date", label: "Date", render: (r) => <span>{formatDate(r.date)}{r.source === "reconstructed" ? <span className="ml-1 text-muted" title="Reconstructed">*</span> : null}</span> },
+                { key: "date", label: "Date", className: "whitespace-nowrap", render: (r) => <span>{formatDate(r.date)}{r.source === "reconstructed" ? <Hint text="Reconstructed"><span className="ml-1 text-muted-foreground">*</span></Hint> : null}</span> },
                 { key: "stars", label: "Stars", align: "right", render: (r) => formatInt(r.stars) },
                 { key: "new_stars", label: "+Stars", align: "right", render: (r) => formatInt(r.new_stars) },
                 { key: "forks", label: "Forks", align: "right", render: (r) => formatInt(r.forks) },
@@ -137,9 +149,9 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
                 { key: "contributors", label: "Contributors", align: "right", render: (r) => formatInt(r.contributors) },
               ]}
             />
-            {reconstructedDays > 0 && <p className="mt-2 text-xs text-muted">* reconstructed from event timestamps (no snapshot that day)</p>}
-          </div>
-        </details>
+            {reconstructedDays > 0 && <p className="mt-2 text-xs text-muted-foreground">* reconstructed from event timestamps (no snapshot that day)</p>}
+          </CollapsibleContent>
+        </Collapsible>
       </Card>
     </div>
   );

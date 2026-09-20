@@ -65,6 +65,7 @@ src/lib/github.ts        REST/GraphQL client with pagination, rate-limit backoff
 src/lib/queries.ts       all dashboard SQL, IST bucketing, snapshot/reconstruction merge
 src/lib/time.ts          IST helpers and the four windows
 src/app/(dashboard)/     pages; src/app/api/ login, logout, collect, health
-src/components/          charts (Recharts), tiles, tables, filters
+src/components/          charts (Recharts), tiles, tables, filters; layout/ is the sidebar shell
+src/components/ui/       shadcn/ui primitives (add more with npx shadcn@latest add <name>)
 src/proxy.ts             password gate (signed cookie)
 ```

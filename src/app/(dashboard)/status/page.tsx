@@ -1,6 +1,12 @@
+import { CalendarClock, Camera, CircleAlert, CircleCheck, CircleX, History, KeyRound, LoaderCircle, ScrollText } from "lucide-react";
 import { Card } from "@/components/Card";
 import { DataTable } from "@/components/DataTable";
+import { Hint } from "@/components/Hint";
+import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { env } from "@/lib/env";
 import { formatInt } from "@/lib/format";
 import { collectorRuns, latestSnapshot, syncState, tableCounts } from "@/lib/queries";
@@ -9,11 +15,37 @@ import { formatIstDateTime, formatRelative } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
-function statusClass(status: string): string {
-  if (status === "ok") return "text-good";
-  if (status === "error") return "text-bad";
-  if (status === "partial") return "text-ink";
-  return "text-ink-2";
+function StatusBadge({ status }: { status: string }) {
+  if (status === "ok") {
+    return (
+      <Badge variant="secondary" className="bg-good/10 text-good">
+        <CircleCheck aria-hidden />
+        {status}
+      </Badge>
+    );
+  }
+  if (status === "error") {
+    return (
+      <Badge variant="destructive">
+        <CircleX aria-hidden />
+        {status}
+      </Badge>
+    );
+  }
+  if (status === "partial") {
+    return (
+      <Badge variant="outline">
+        <CircleAlert aria-hidden />
+        {status}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="secondary" className="text-muted-foreground">
+      <LoaderCircle aria-hidden />
+      {status}
+    </Badge>
+  );
 }
 
 export default async function StatusPage() {
@@ -23,25 +55,23 @@ export default async function StatusPage() {
   const failures = runs.filter((r) => r.status === "error").length;
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold text-ink">Collector status</h1>
-        <p className="text-xs text-ink-2">Runs at 12 AM, 6 AM, 12 PM and 6 PM IST. Each run snapshots the headline numbers and pulls new events.</p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader title="Collector status" description="Runs at 12 AM, 6 AM, 12 PM and 6 PM IST. Each run snapshots the headline numbers and pulls new events." />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatTile
+          icon={<History />}
           label="Last run"
           valueText={lastRun ? lastRun.status : "never"}
           value={null}
           hint={lastRun ? `${formatRelative(lastRun.started_at)} · ${lastRun.kind} (${lastRun.triggered_by})` : "No collector run recorded"}
         />
-        <StatTile label="Next scheduled run" valueText={formatIstDateTime(nextRun()).replace(/^.*?, /, "")} value={null} hint={formatIstDateTime(nextRun())} />
-        <StatTile label="Snapshots stored" value={counts.snapshots} hint={latest ? `Latest ${formatIstDateTime(latest.captured_at)}` : undefined} />
-        <StatTile label="GitHub token" valueText={hasToken ? "configured" : "missing"} value={null} hint={hasToken ? "5,000 requests/hour" : "60 requests/hour; backfill disabled"} />
+        <StatTile icon={<CalendarClock />} label="Next scheduled run" valueText={formatIstDateTime(nextRun()).replace(/^.*?, /, "")} value={null} hint={formatIstDateTime(nextRun())} />
+        <StatTile icon={<Camera />} label="Snapshots stored" value={counts.snapshots} hint={latest ? `Latest ${formatIstDateTime(latest.captured_at)}` : undefined} />
+        <StatTile icon={<KeyRound />} label="GitHub token" valueText={hasToken ? "configured" : "missing"} value={null} hint={hasToken ? "5,000 requests/hour" : "60 requests/hour; backfill disabled"} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Event tables" subtitle="Rows loaded by backfill and incremental sync">
           <DataTable
             rows={[
@@ -67,9 +97,18 @@ export default async function StatusPage() {
             dense
             emptyText="No sync has run yet"
             columns={[
-              { key: "key", label: "Key", render: (r) => <code className="text-xs">{r.key}</code> },
-              { key: "value", label: "Value", render: (r) => <span className="font-mono text-xs">{r.value}</span> },
-              { key: "updated_at", label: "Updated", render: (r) => formatRelative(r.updated_at) },
+              { key: "key", label: "Key", render: (r) => <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">{r.key}</code> },
+              { key: "value", label: "Value", render: (r) => <span className="font-mono text-xs break-all">{r.value}</span> },
+              {
+                key: "updated_at",
+                label: "Updated",
+                className: "whitespace-nowrap text-muted-foreground",
+                render: (r) => (
+                  <Hint text={formatIstDateTime(r.updated_at)}>
+                    <span>{formatRelative(r.updated_at)}</span>
+                  </Hint>
+                ),
+              },
             ]}
           />
         </Card>
@@ -82,10 +121,10 @@ export default async function StatusPage() {
           dense
           emptyText="No runs yet"
           columns={[
-            { key: "id", label: "#", render: (r) => r.id },
-            { key: "started_at", label: "Started (IST)", render: (r) => formatIstDateTime(r.started_at) },
-            { key: "kind", label: "Kind", render: (r) => `${r.kind} · ${r.triggered_by}` },
-            { key: "status", label: "Status", render: (r) => <span className={`font-medium ${statusClass(r.status)}`}>{r.status}</span> },
+            { key: "id", label: "#", className: "text-muted-foreground tnum", render: (r) => r.id },
+            { key: "started_at", label: "Started (IST)", className: "whitespace-nowrap", render: (r) => formatIstDateTime(r.started_at) },
+            { key: "kind", label: "Kind", className: "whitespace-nowrap", render: (r) => `${r.kind} · ${r.triggered_by}` },
+            { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
             {
               key: "duration",
               label: "Duration",
@@ -101,13 +140,34 @@ export default async function StatusPage() {
                 const log = Array.isArray(detail.log) ? (detail.log as string[]) : [];
                 const rest = Object.fromEntries(Object.entries(detail).filter(([k]) => k !== "log"));
                 return (
-                  <details>
-                    <summary className="cursor-pointer text-ink-2">{r.error ? <span className="text-bad">{r.error.slice(0, 80)}</span> : "show"}</summary>
-                    <pre className="mt-1 max-h-64 overflow-auto rounded bg-grid p-2 font-mono text-[11px] leading-snug text-ink">
-                      {JSON.stringify(rest, null, 2)}
-                      {log.length ? `\n\n${log.join("\n")}` : ""}
-                    </pre>
-                  </details>
+                  <div className="flex items-center gap-2">
+                    <Sheet>
+                      <SheetTrigger asChild>
+                        <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground">
+                          <ScrollText aria-hidden />
+                          show
+                        </Button>
+                      </SheetTrigger>
+                      <SheetContent className="w-full gap-0 data-[side=right]:sm:max-w-2xl">
+                        <SheetHeader className="border-b">
+                          <SheetTitle className="flex items-center gap-2">
+                            Run #{r.id} <StatusBadge status={r.status} />
+                          </SheetTitle>
+                          <SheetDescription>
+                            {formatIstDateTime(r.started_at)} · {r.kind} · {r.triggered_by} · {formatInt(r.api_calls)} API calls
+                          </SheetDescription>
+                        </SheetHeader>
+                        <div className="flex-1 space-y-3 overflow-auto p-4">
+                          {r.error && <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs break-words text-destructive">{r.error}</p>}
+                          <pre className="overflow-auto rounded-lg border bg-muted/50 p-3 font-mono text-[11px] leading-relaxed text-foreground">
+                            {JSON.stringify(rest, null, 2)}
+                            {log.length ? `\n\n${log.join("\n")}` : ""}
+                          </pre>
+                        </div>
+                      </SheetContent>
+                    </Sheet>
+                    {r.error && <span className="line-clamp-1 text-bad">{r.error.slice(0, 80)}</span>}
+                  </div>
                 );
               },
             },

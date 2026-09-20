@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { CardAction, CardContent, CardDescription, CardHeader, CardTitle, Card as UiCard } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface CardProps {
   title?: ReactNode;
@@ -8,19 +10,17 @@ interface CardProps {
   className?: string;
 }
 
-export function Card({ title, subtitle, action, children, className = "" }: CardProps) {
+export function Card({ title, subtitle, action, children, className }: CardProps) {
   return (
-    <section className={`rounded-lg border border-line bg-surface p-4 ${className}`}>
+    <UiCard className={cn("shadow-xs", className)}>
       {(title || action) && (
-        <header className="mb-3 flex flex-wrap items-start justify-between gap-2">
-          <div>
-            {title && <h2 className="text-sm font-semibold text-ink">{title}</h2>}
-            {subtitle && <p className="mt-0.5 text-xs text-ink-2">{subtitle}</p>}
-          </div>
-          {action}
-        </header>
+        <CardHeader>
+          {title && <CardTitle className="text-sm font-semibold">{title}</CardTitle>}
+          {subtitle && <CardDescription className="text-xs text-pretty">{subtitle}</CardDescription>}
+          {action && <CardAction>{action}</CardAction>}
+        </CardHeader>
       )}
-      {children}
-    </section>
+      <CardContent>{children}</CardContent>
+    </UiCard>
   );
 }

@@ -1,9 +1,13 @@
 import type { ReactNode } from "react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 export interface Column<T> {
   key: string;
   label: string;
   align?: "left" | "right";
+  /** Extra classes for this column's header and cells (e.g. whitespace-nowrap). */
+  className?: string;
   render: (row: T) => ReactNode;
 }
 
@@ -16,32 +20,30 @@ interface DataTableProps<T> {
 }
 
 export function DataTable<T>({ columns, rows, rowKey, emptyText = "No rows", dense = false }: DataTableProps<T>) {
-  if (rows.length === 0) return <p className="text-xs text-muted">{emptyText}</p>;
-  const pad = dense ? "px-2 py-1" : "px-2 py-1.5";
+  if (rows.length === 0) return <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{emptyText}</p>;
+  const pad = dense ? "px-2.5 py-2" : "px-3 py-2.5";
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-line text-ink-2">
-            {columns.map((c) => (
-              <th key={c.key} className={`${pad} font-medium ${c.align === "right" ? "text-right" : "text-left"}`}>
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={rowKey(row)} className="border-b border-line last:border-0">
-              {columns.map((c) => (
-                <td key={c.key} className={`${pad} ${c.align === "right" ? "text-right tnum" : "text-left"} text-ink`}>
-                  {c.render(row)}
-                </td>
-              ))}
-            </tr>
+    <Table className={dense ? "text-xs" : "text-sm"}>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          {columns.map((c) => (
+            <TableHead key={c.key} className={cn("h-9 px-2.5 text-xs font-medium text-muted-foreground", c.align === "right" && "text-right", c.className)}>
+              {c.label}
+            </TableHead>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={rowKey(row)}>
+            {columns.map((c) => (
+              <TableCell key={c.key} className={cn(pad, c.align === "right" ? "text-right tnum" : "text-left whitespace-normal", c.className)}>
+                {c.render(row)}
+              </TableCell>
+            ))}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

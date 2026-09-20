@@ -1,9 +1,12 @@
+import { GitCommitHorizontal, Tag, UserPlus, Users } from "lucide-react";
 import { Card } from "@/components/Card";
 import { DataTable } from "@/components/DataTable";
 import { HorizontalBars } from "@/components/HorizontalBars";
+import { PageHeader } from "@/components/PageHeader";
 import { RangeFilter } from "@/components/RangeFilter";
 import { StatTile } from "@/components/StatTile";
 import { TimeSeriesChart } from "@/components/TimeSeriesChart";
+import { Badge } from "@/components/ui/badge";
 import { env } from "@/lib/env";
 import { fixed, formatInt } from "@/lib/format";
 import { dailySeries, dataStartDate, latestSnapshot, releasesIn, topContributors } from "@/lib/queries";
@@ -30,21 +33,18 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
   const stable = releases.filter((r) => !r.prerelease).length;
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-semibold text-ink">Activity</h1>
-        <p className="text-xs text-ink-2">Commits on the default branch, contributor growth and release cadence.</p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader title="Activity" description="Commits on the default branch, contributor growth and release cadence." />
       <RangeFilter range={range} basePath="/activity" />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="Commits in range" value={commits} hint={`${fixed(commits / range.days)} per day`} />
-        <StatTile label="New contributors in range" value={newContributors} hint={`${formatInt(latest?.contributors ?? last.contributors)} total`} />
-        <StatTile label="Releases in range" value={releasesCount} hint={`${formatInt(stable)} stable · ${formatInt(releases.length - stable)} pre-release (of ${releases.length} listed)`} />
-        <StatTile label="Active contributors" value={contributors.length} hint="With at least one commit in range (top 15 shown)" />
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        <StatTile icon={<GitCommitHorizontal />} label="Commits in range" value={commits} hint={`${fixed(commits / range.days)} per day`} />
+        <StatTile icon={<UserPlus />} label="New contributors in range" value={newContributors} hint={`${formatInt(latest?.contributors ?? last.contributors)} total`} />
+        <StatTile icon={<Tag />} label="Releases in range" value={releasesCount} hint={`${formatInt(stable)} stable · ${formatInt(releases.length - stable)} pre-release (of ${releases.length} listed)`} />
+        <StatTile icon={<Users />} label="Active contributors" value={contributors.length} hint="With at least one commit in range (top 15 shown)" />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Commits per day">
           <TimeSeriesChart data={series} series={[{ key: "commits", label: "Commits", color: "var(--series-1)", type: "bar" }]} />
         </Card>
@@ -72,15 +72,16 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
             {
               key: "tag",
               label: "Tag",
+              className: "whitespace-nowrap",
               render: (r) => (
-                <a href={`https://github.com/${env.repo}/releases/tag/${encodeURIComponent(r.tag)}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                <a href={`https://github.com/${env.repo}/releases/tag/${encodeURIComponent(r.tag)}`} target="_blank" rel="noreferrer" className="font-medium text-link underline-offset-4 hover:underline">
                   {r.tag}
                 </a>
               ),
             },
             { key: "name", label: "Name", render: (r) => <span className="line-clamp-1">{r.name ?? "—"}</span> },
-            { key: "kind", label: "Kind", render: (r) => (r.prerelease ? "pre-release" : "stable") },
-            { key: "published_at", label: "Published", render: (r) => formatIstDateTime(r.published_at) },
+            { key: "kind", label: "Kind", render: (r) => <Badge variant={r.prerelease ? "outline" : "secondary"}>{r.prerelease ? "pre-release" : "stable"}</Badge> },
+            { key: "published_at", label: "Published", className: "whitespace-nowrap", render: (r) => formatIstDateTime(r.published_at) },
           ]}
         />
       </Card>
