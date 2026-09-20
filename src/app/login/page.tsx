@@ -1,4 +1,5 @@
-import { CircleAlert, LockKeyhole, Rainbow } from "lucide-react";
+import { CircleAlert, LockKeyhole } from "lucide-react";
+import { BifrostLogo } from "@/components/BifrostLogo";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,11 +22,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       />
       <div className="relative w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-3 text-center">
-          <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <Rainbow className="size-5" />
-          </span>
+          <BifrostLogo className="h-8 w-auto text-foreground" />
           <div>
-            <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">Bifrost · GitHub tracker</h1>
+            <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">GitHub tracker</h1>
             <p className="mt-1 text-sm text-muted-foreground">Stars, forks, issues and activity, four times a day.</p>
           </div>
         </div>

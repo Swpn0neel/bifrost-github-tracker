@@ -2,14 +2,15 @@
 
 import { useId } from "react";
 import { Area, AreaChart, ResponsiveContainer, YAxis } from "recharts";
+import { CHART_RESIZE_SETTLE_MS, STRETCH_WHILE_RESIZING } from "./chart-resize";
 
 export function Sparkline({ values, color = "var(--series-1)" }: { values: number[]; color?: string }) {
   const gradientId = `spark-${useId().replace(/:/g, "")}`;
   const data = values.map((v, i) => ({ i, v }));
   return (
     <div className="h-10 w-full" aria-hidden>
-      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 200, height: 40 }}>
-        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
+      <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 200, height: 40 }} debounce={CHART_RESIZE_SETTLE_MS}>
+        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} {...STRETCH_WHILE_RESIZING}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity={0.3} />

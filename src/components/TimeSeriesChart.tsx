@@ -3,6 +3,7 @@
 import { useId } from "react";
 import { Area, Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
+import { CHART_RESIZE_SETTLE_MS, STRETCH_WHILE_RESIZING } from "./chart-resize";
 import { compact, formatInt } from "@/lib/format";
 import { formatDate, formatShortDate } from "@/lib/time";
 
@@ -87,8 +88,8 @@ export function TimeSeriesChart({
 
   return (
     <div>
-      <ChartContainer config={config} className="aspect-auto w-full" style={{ height }} initialDimension={{ width: 600, height }}>
-        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%" barGap={2}>
+      <ChartContainer config={config} className="aspect-auto w-full" style={{ height }} initialDimension={{ width: 600, height }} debounce={CHART_RESIZE_SETTLE_MS}>
+        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%" barGap={2} {...STRETCH_WHILE_RESIZING}>
           <defs>
             {series
               .filter((s) => s.type === "area")

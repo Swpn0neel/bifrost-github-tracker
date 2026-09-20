@@ -10,7 +10,11 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   const { setOpenMobile } = useSidebar();
   return (
     <SidebarGroup>
-      <SidebarGroupLabel>{label}</SidebarGroupLabel>
+      {/* Keeps its row when collapsed (label fades to a hairline), so the icons below never move vertically. */}
+      <SidebarGroupLabel className="relative group-data-[collapsible=icon]:mt-0 group-data-[collapsible=icon]:opacity-100">
+        <span className="sidebar-fade">{label}</span>
+        <span aria-hidden className="sidebar-rail-rule absolute top-1/2 left-2 h-px w-4 bg-sidebar-border" />
+      </SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
           {items.map(({ href, label, icon: Icon }) => {
@@ -20,7 +24,7 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
                 <SidebarMenuButton asChild isActive={active} tooltip={label}>
                   <Link href={href} aria-current={active ? "page" : undefined} onClick={() => setOpenMobile(false)}>
                     <Icon />
-                    <span>{label}</span>
+                    <span className="sidebar-fade">{label}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

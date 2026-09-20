@@ -182,6 +182,93 @@
   }
 }
 
+/* Sidebar open/close.
+   Principle: nothing inside the sidebar moves or squeezes. Its contents keep their expanded layout
+   (AppSidebar pins their width), labels cross-fade, and the moving edge wipes over them. Only three things
+   animate, all on one clock and curve: the edge (gap + container width), the highlight pills, and the
+   content panel's margin. */
+:root {
+  --sidebar-duration: 300ms;
+  --sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+[data-slot="sidebar-gap"],
+[data-slot="sidebar-container"],
+[data-slot="sidebar-menu-button"] {
+  transition-duration: var(--sidebar-duration);
+  transition-timing-function: var(--sidebar-ease);
+}
+[data-slot="sidebar-inset"] {
+  transition: margin-left var(--sidebar-duration) var(--sidebar-ease);
+}
+
+/* Labels: gone before the edge reaches them when closing, back once it has passed them when opening. */
+.sidebar-fade,
+.sidebar-fade-hide {
+  transition: opacity 170ms ease-out 130ms, visibility 0s;
+}
+[data-slot="sidebar"][data-collapsible="icon"] .sidebar-fade,
+[data-slot="sidebar"][data-collapsible="icon"] .sidebar-fade-hide {
+  opacity: 0;
+  transition: opacity 100ms ease-out, visibility 0s linear 100ms;
+}
+/* Controls (unlike labels, which must stay readable to assistive tech) also leave the tab order. */
+[data-slot="sidebar"][data-collapsible="icon"] .sidebar-fade-hide {
+  visibility: hidden;
+}
+/* On the rail a button shrinks to its 32px pill, but its label must not be squeezed or ellipsized on the
+   way: let it keep its natural width and overflow; the sidebar edge does the clipping. */
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"] {
+  overflow: visible;
+}
+[data-slot="sidebar"][data-collapsible="icon"] [data-slot="sidebar-menu-button"] > .sidebar-fade {
+  flex: none;
+  width: max-content;
+  overflow: visible;
+}
+/* Collapsed, the rail swaps each group label for a short hairline. */
+.sidebar-rail-rule {
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+[data-slot="sidebar"][data-collapsible="icon"] .sidebar-rail-rule {
+  opacity: 1;
+  transition: opacity 170ms ease-out 130ms;
+}
+
+/* Dragging the sidebar edge: follow the pointer instead of easing toward it. */
+[data-resizing="true"] {
+  cursor: col-resize;
+  user-select: none;
+}
+[data-resizing="true"] [data-slot="sidebar-gap"],
+[data-resizing="true"] [data-slot="sidebar-container"],
+[data-resizing="true"] [data-slot="sidebar-menu-button"],
+[data-resizing="true"] [data-slot="sidebar-inset"] {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sidebar-duration: 0ms;
+  }
+  .sidebar-fade,
+  .sidebar-fade-hide,
+  .sidebar-rail-rule {
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* Charts redraw only once a resize settles (CHART_RESIZE_SETTLE_MS); until then the drawn SVG stretches with its box.
+   Recharts parks the chart inside a 0x0 box, so a percentage width would resolve to nothing; container units
+   measure the responsive container itself. */
+.recharts-responsive-container {
+  container-type: inline-size;
+}
+.recharts-wrapper {
+  width: 100cqw !important;
+}
+
 .tnum {
   font-variant-numeric: tabular-nums;
 }
