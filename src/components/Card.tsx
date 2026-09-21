@@ -8,9 +8,10 @@ interface CardProps {
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  contentClassName?: string;
 }
 
-export function Card({ title, subtitle, action, children, className }: CardProps) {
+export function Card({ title, subtitle, action, children, className, contentClassName }: CardProps) {
   return (
     <UiCard className={cn("shadow-xs", className)}>
       {(title || action) && (
@@ -20,7 +21,7 @@ export function Card({ title, subtitle, action, children, className }: CardProps
           {action && <CardAction>{action}</CardAction>}
         </CardHeader>
       )}
-      <CardContent>{children}</CardContent>
+      <CardContent className={contentClassName}>{children}</CardContent>
     </UiCard>
   );
 }

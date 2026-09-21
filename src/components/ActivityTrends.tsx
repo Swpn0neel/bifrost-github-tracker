@@ -35,10 +35,10 @@ const PRESETS = [
 ] as const;
 type PresetKey = (typeof PRESETS)[number]["key"];
 
-const GROUPS: { key: TrendGroup; label: string; unit: string }[] = [
-  { key: "day", label: "Day", unit: "day" },
-  { key: "week", label: "Week", unit: "week" },
-  { key: "month", label: "Month", unit: "month" },
+const GROUPS: { key: TrendGroup; label: string; unit: string; title: string }[] = [
+  { key: "day", label: "Day", unit: "day", title: "Daily activity" },
+  { key: "week", label: "Week", unit: "week", title: "Weekly activity" },
+  { key: "month", label: "Month", unit: "month", title: "Monthly activity" },
 ];
 
 /** Grouping that keeps a range readable: days up to a quarter, weeks up to about a year, months beyond. */
@@ -86,18 +86,27 @@ interface ActivityTrendsProps {
   monthlyStars?: Record<string, number>;
   /** Caveat about where the star numbers come from. */
   starsNote?: ReactNode;
+  /** Range the card opens on; falls back to "all" when the history is shorter than it. */
+  defaultPreset?: PresetKey;
+  /** Grouping the card opens on; without one it follows the range. */
+  defaultGroup?: TrendGroup;
+  /** Range options to offer, for a card meant for long or short views. Defaults to all of them. */
+  presets?: readonly PresetKey[];
 }
 
-export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrendsProps) {
+export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = "60d", defaultGroup, presets }: ActivityTrendsProps) {
   const dataStart = days[0]?.date ?? "";
   const today = days[days.length - 1]?.date ?? "";
 
-  const [preset, setPreset] = useState<PresetKey>("60d");
+  const span = dataStart ? daysBetween(dataStart, today) + 1 : 0;
+  // A preset longer than the history would draw the same chart as "All".
+  const presetFits = (p: (typeof PRESETS)[number]) => p.days === null || p.days < span;
+  const [preset, setPreset] = useState<PresetKey>(() => (PRESETS.some((p) => p.key === defaultPreset && presetFits(p)) ? defaultPreset : "all"));
   // `custom` is what the date inputs show; `applied` is the last valid pair, which is what gets drawn.
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [applied, setApplied] = useState<{ from: string; to: string } | null>(null);
   // null = follow the range; a choice sticks for as long as it still fits the range.
-  const [groupChoice, setGroupChoice] = useState<TrendGroup | null>(null);
+  const [groupChoice, setGroupChoice] = useState<TrendGroup | null>(defaultGroup ?? null);
   const [hidden, setHidden] = useState<ReadonlySet<TrendMetric>>(() => new Set(METRICS.filter((m) => !m.defaultOn).map((m) => m.key)));
 
   const presetRange = (key: PresetKey): { from: string; to: string } => {
@@ -109,7 +118,8 @@ export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrends
 
   const isValid = (c: { from: string; to: string }) => isIsoDate(c.from) && isIsoDate(c.to) && c.from <= c.to && c.to >= dataStart && c.from <= today;
   const customValid = isValid(custom);
-  const range = preset === "custom" && applied ? { from: applied.from < dataStart ? dataStart : applied.from, to: applied.to > today ? today : applied.to } : presetRange(preset === "custom" ? "all" : preset);
+  const range =
+    preset === "custom" && applied ? { from: applied.from < dataStart ? dataStart : applied.from, to: applied.to > today ? today : applied.to } : presetRange(preset === "custom" ? "all" : preset);
 
   const group = groupChoice && groupFits(range.from, range.to, groupChoice) ? groupChoice : autoGroup(range.from, range.to);
   const { rows, from, to } = trendWindow(days, range.from, range.to, group, monthlyStars);
@@ -147,10 +157,8 @@ export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrends
   }
 
   const visible: ChartSeries[] = METRICS.filter((m) => !hidden.has(m.key)).map((m) => ({ key: m.key, label: m.label, color: m.color, type: "line" }));
-  const unit = GROUPS.find((g) => g.key === group)?.unit ?? group;
-  // Longer presets than the history would all draw the same chart as "All".
-  const span = daysBetween(dataStart, today) + 1;
-  const presetOptions = PRESETS.filter((p) => p.days === null || p.days < span || p.key === preset);
+  const { unit, title } = GROUPS.find((g) => g.key === group) ?? GROUPS[0];
+  const presetOptions = PRESETS.filter((p) => p.key === preset || ((!presets || presets.includes(p.key)) && presetFits(p)));
   const groupOptions = GROUPS.map((g) => ({ key: g.key, label: g.label, disabled: !groupFits(range.from, range.to, g.key) }));
 
   const formatX = group === "month" ? formatMonth : formatShortDate;
@@ -160,7 +168,12 @@ export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrends
   };
 
   return (
-    <Card title="Repository activity" subtitle={`New stars, forks, issues, PRs and commits per ${unit}, ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}>
+    // In a row of cards the chart sits at the bottom, so charts line up even when the chips wrap differently.
+    <Card
+      contentClassName="flex flex-1 flex-col"
+      title={title}
+      subtitle={`New stars, forks, issues, PRs and commits per ${unit}, ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}
+    >
       <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <Segmented label="Time range" value={preset} options={presetOptions} onChange={pickPreset} />
         <Segmented label="Group by" value={group} options={groupOptions} onChange={setGroupChoice} />
@@ -196,7 +209,7 @@ export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrends
         </p>
       )}
 
-      <ul className="mb-4 flex flex-wrap gap-1.5" aria-label="Metrics">
+      <ul className="mb-4 flex flex-wrap content-start gap-1.5" aria-label="Metrics">
         {METRICS.map((m) => {
           const on = !hidden.has(m.key);
           const known = rows.filter((r) => r[m.key] !== null);
@@ -221,17 +234,19 @@ export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrends
         })}
       </ul>
 
-      {visible.length === 0 ? (
-        <div className="flex h-[300px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">Pick a metric above to draw its line.</div>
-      ) : (
-        <TimeSeriesChart data={rows} series={visible} height={300} legend={false} partialLast={partialLast} formatX={formatX} formatXLong={formatXLong} />
-      )}
+      <div className="mt-auto">
+        {visible.length === 0 ? (
+          <div className="flex h-[300px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">Pick a metric above to draw its line.</div>
+        ) : (
+          <TimeSeriesChart data={rows} series={visible} height={300} legend={false} partialLast={partialLast} formatX={formatX} formatXLong={formatXLong} />
+        )}
 
-      <p className="mt-3 text-xs text-pretty text-muted-foreground">
-        Click a metric to show or hide its line; its number is the total for the range.
-        {partialLast && ` The dashed end is the ${unit} still in progress.`}
-        {starsNote && <> {starsNote}</>}
-      </p>
+        <p className="mt-3 text-xs text-pretty text-muted-foreground">
+          Click a metric to show or hide its line; its number is the total for the range.
+          {partialLast && ` The dashed end is the ${unit} still in progress.`}
+          {starsNote && <> {starsNote}</>}
+        </p>
+      </div>
     </Card>
   );
 }

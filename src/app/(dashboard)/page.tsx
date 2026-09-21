@@ -63,6 +63,17 @@ export default async function OverviewPage() {
   const milestone = Math.ceil((stars + 1) / 1000) * 1000;
   const etaDays = perDay7 !== null && perDay7 > 0 ? Math.ceil((milestone - stars) / perDay7) : null;
 
+  const trend = dailyTrend(history);
+  const starsNote =
+    starEvents || !first ? undefined : estimated ? (
+      <>
+        Star gains up to {formatDate(first.ist_date)} are estimates from {trendshift} (UTC days; months only before its daily record starts); after that they are the net change between our daily
+        snapshots.
+      </>
+    ) : (
+      `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`
+    );
+
   const avg7 = rollingMean(
     series.map((p) => (p.new_stars_known ? p.new_stars : null)),
     7,
@@ -120,17 +131,13 @@ export default async function OverviewPage() {
         </div>
       </div>
 
-      <ActivityTrends
-        days={dailyTrend(history)}
-        monthlyStars={monthlyStars}
-        starsNote={
-          starEvents || !first ? undefined : estimated ? (
-            <>Star gains up to {formatDate(first.ist_date)} are estimates from {trendshift} (UTC days; months only before its daily record starts); after that they are the net change between our daily snapshots.</>
-          ) : (
-            `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`
-          )
-        }
-      />
+      <section aria-label="Repository activity" className="space-y-2">
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ActivityTrends days={trend} monthlyStars={monthlyStars} defaultPreset="60d" defaultGroup="day" presets={["7d", "30d", "60d", "90d", "6m", "custom"]} />
+          <ActivityTrends days={trend} monthlyStars={monthlyStars} defaultPreset="2y" defaultGroup="month" presets={["6m", "1y", "2y", "all", "custom"]} />
+        </div>
+        {starsNote && <p className="px-1 text-xs text-pretty text-muted-foreground">{starsNote}</p>}
+      </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card
