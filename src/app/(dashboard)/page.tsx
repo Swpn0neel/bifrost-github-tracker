@@ -1,4 +1,5 @@
 import { CircleDot, Eye, GitFork, GitPullRequest, MessagesSquare, Rocket, Star, Users } from "lucide-react";
+import { ActivityTrends } from "@/components/ActivityTrends";
 import { Card } from "@/components/Card";
 import { DataTable } from "@/components/DataTable";
 import { PageHeader } from "@/components/PageHeader";
@@ -9,7 +10,8 @@ import { env } from "@/lib/env";
 import { formatInt, signed } from "@/lib/format";
 import { dailySeries, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
 import { rollingMean, sumBy } from "@/lib/stats";
-import { addDays, formatDate, formatIstDateTime, istDate } from "@/lib/time";
+import { formatDate, formatIstDateTime, istDate, monthStart } from "@/lib/time";
+import { dailyTrend, monthlyTrend } from "@/lib/trends";
 
 export const dynamic = "force-dynamic";
 
@@ -27,8 +29,10 @@ const WEEK_ROWS: { key: keyof DailyPoint; label: string }[] = [
 
 export default async function OverviewPage() {
   const today = istDate();
-  const from = addDays(today, -30);
-  const [latest, series, first, starEvents] = await Promise.all([latestSnapshot(), dailySeries(from, today), firstSnapshot(), hasStarEvents()]);
+  // Two years of whole months feed the activity trends; the rest of the page reads the last 30 days of it.
+  const [latest, history, first, starEvents] = await Promise.all([latestSnapshot(), dailySeries(monthStart(today, -23), today), firstSnapshot(), hasStarEvents()]);
+  const series = history.slice(-31);
+  const trend = dailyTrend(history, starEvents);
 
   const n = series.length;
   const cur = series[n - 1];
@@ -102,6 +106,12 @@ export default async function OverviewPage() {
           <StatTile label="Discussions" icon={<MessagesSquare />} value={latest?.discussions ?? null} hint={latest?.discussions == null ? "Needs GITHUB_TOKEN" : undefined} />
         </div>
       </div>
+
+      <ActivityTrends
+        daily={trend.slice(-60)}
+        monthly={monthlyTrend(trend)}
+        starsNote={starEvents || !first ? undefined : `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`}
+      />
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card title="Stars, last 30 days" subtitle={first ? `Snapshots since ${formatDate(first.ist_date)}${starEvents ? "; earlier days reconstructed from star timestamps" : "; no star history before that (GitHub does not expose the stargazer list to this token)"}` : "No snapshots yet"}>

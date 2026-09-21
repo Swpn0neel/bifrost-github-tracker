@@ -26,6 +26,8 @@ interface TimeSeriesChartProps {
   formatX?: (v: string) => string;
   formatXLong?: (v: string) => string;
   formatY?: (v: number) => string;
+  /** Set to false when the caller renders its own legend. */
+  legend?: boolean;
 }
 
 interface TooltipProps {
@@ -77,6 +79,7 @@ export function TimeSeriesChart({
   formatX = formatShortDate,
   formatXLong = formatDate,
   formatY = defaultFormatY,
+  legend = true,
 }: TimeSeriesChartProps) {
   const gradientPrefix = `area-${useId().replace(/:/g, "")}`;
   const hasBars = series.some((s) => s.type === "bar");
@@ -161,6 +164,8 @@ export function TimeSeriesChart({
                 />
               );
             }
+            // A line needs two points; a series with a single known value would otherwise draw nothing.
+            const lonePoint = data.filter((row) => typeof (row as Record<string, unknown>)[s.key] === "number").length === 1;
             return (
               <Line
                 key={s.key}
@@ -169,7 +174,7 @@ export function TimeSeriesChart({
                 name={s.label}
                 stroke={s.color}
                 strokeWidth={2}
-                dot={false}
+                dot={lonePoint ? { r: 4, fill: s.color, stroke: "var(--card)", strokeWidth: 2 } : false}
                 activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
                 isAnimationActive={false}
                 connectNulls
@@ -178,7 +183,7 @@ export function TimeSeriesChart({
           })}
         </ComposedChart>
       </ChartContainer>
-      {series.length > 1 && (
+      {legend && series.length > 1 && (
         <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {series.map((s) => (
             <li key={s.key} className="flex items-center gap-1.5">

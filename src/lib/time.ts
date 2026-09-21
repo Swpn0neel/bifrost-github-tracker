@@ -75,6 +75,19 @@ export function formatShortDate(date: string): string {
   return `${d} ${MONTHS[m - 1]}`;
 }
 
+/** "2026-09" -> "Sep 2026" */
+export function formatMonth(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return `${MONTHS[m - 1]} ${y}`;
+}
+
+/** First day of the month `n` months away from the month `date` falls in. */
+export function monthStart(date: string, n = 0): string {
+  const [y, m] = date.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return d.toISOString().slice(0, 10);
+}
+
 export function formatIstDateTime(value: Date | string | null | undefined): string {
   if (!value) return "—";
   const s = shifted(typeof value === "string" ? new Date(value) : value);

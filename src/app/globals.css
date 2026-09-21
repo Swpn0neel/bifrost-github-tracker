@@ -43,6 +43,9 @@
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
   --series-gray: #a8a7a0;
   /* shadcn chart slots point at the same validated series */
   --chart-1: var(--series-1);
@@ -102,6 +105,9 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
   --series-gray: #6b6a66;
   --ord-1: #9ec5f4;
   --ord-2: #6da7ec;
