@@ -133,8 +133,8 @@ export default async function OverviewPage() {
 
       <section aria-label="Repository activity" className="space-y-2">
         <div className="grid gap-4 xl:grid-cols-2">
-          <ActivityTrends days={trend} monthlyStars={monthlyStars} defaultPreset="60d" defaultGroup="day" presets={["7d", "30d", "60d", "90d", "6m", "custom"]} />
-          <ActivityTrends days={trend} monthlyStars={monthlyStars} defaultPreset="2y" defaultGroup="month" presets={["6m", "1y", "2y", "all", "custom"]} />
+          <ActivityTrends group="day" days={trend} monthlyStars={monthlyStars} defaultPreset="60d" presets={["7d", "30d", "60d", "90d", "6m", "custom"]} />
+          <ActivityTrends group="month" days={trend} monthlyStars={monthlyStars} defaultPreset="2y" presets={["6m", "1y", "2y", "all", "custom"]} />
         </div>
         {starsNote && <p className="px-1 text-xs text-pretty text-muted-foreground">{starsNote}</p>}
       </section>

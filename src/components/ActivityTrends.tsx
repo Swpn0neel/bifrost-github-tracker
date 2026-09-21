@@ -7,7 +7,7 @@ import { TimeSeriesChart, type ChartSeries } from "@/components/TimeSeriesChart"
 import { Input } from "@/components/ui/input";
 import { formatInt } from "@/lib/format";
 import { addDays, daysBetween, formatDate, formatMonth, formatShortDate, isIsoDate } from "@/lib/time";
-import { periodCount, periodEnd, trendWindow, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
+import { periodEnd, trendWindow, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
 import { cn } from "@/lib/utils";
 
 // Colour follows the metric, so hiding a line never repaints the ones that stay.
@@ -35,25 +35,12 @@ const PRESETS = [
 ] as const;
 type PresetKey = (typeof PRESETS)[number]["key"];
 
-const GROUPS: { key: TrendGroup; label: string; unit: string; title: string }[] = [
-  { key: "day", label: "Day", unit: "day", title: "Daily activity" },
-  { key: "week", label: "Week", unit: "week", title: "Weekly activity" },
-  { key: "month", label: "Month", unit: "month", title: "Monthly activity" },
-];
-
-/** Grouping that keeps a range readable: days up to a quarter, weeks up to about a year, months beyond. */
-function autoGroup(from: string, to: string): TrendGroup {
-  const days = daysBetween(from, to) + 1;
-  return days <= 92 ? "day" : days <= 400 ? "week" : "month";
-}
-
-/** A line needs at least two periods. */
-const groupFits = (from: string, to: string, group: TrendGroup) => group === "day" || periodCount(from, to, group) >= 2;
+const TITLES: Record<TrendGroup, string> = { day: "Daily activity", week: "Weekly activity", month: "Monthly activity" };
 
 interface SegmentedProps<K extends string> {
   label: string;
   value: K;
-  options: readonly { key: K; label: string; disabled?: boolean }[];
+  options: readonly { key: K; label: string }[];
   onChange: (key: K) => void;
 }
 
@@ -65,10 +52,9 @@ function Segmented<K extends string>({ label, value, options, onChange }: Segmen
           key={o.key}
           type="button"
           aria-pressed={value === o.key}
-          disabled={o.disabled}
           onClick={() => onChange(o.key)}
           className={cn(
-            "inline-flex h-[26px] items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-40",
+            "inline-flex h-[26px] items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
             value === o.key ? "bg-background text-foreground shadow-sm dark:bg-input/50" : "hover:text-foreground",
           )}
         >
@@ -86,15 +72,15 @@ interface ActivityTrendsProps {
   monthlyStars?: Record<string, number>;
   /** Caveat about where the star numbers come from. */
   starsNote?: ReactNode;
+  /** What one point on the chart covers. Fixed per card: a daily chart stays daily whatever the range. */
+  group: TrendGroup;
   /** Range the card opens on; falls back to "all" when the history is shorter than it. */
   defaultPreset?: PresetKey;
-  /** Grouping the card opens on; without one it follows the range. */
-  defaultGroup?: TrendGroup;
   /** Range options to offer, for a card meant for long or short views. Defaults to all of them. */
   presets?: readonly PresetKey[];
 }
 
-export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = "60d", defaultGroup, presets }: ActivityTrendsProps) {
+export function ActivityTrends({ days, monthlyStars, starsNote, group, defaultPreset = "60d", presets }: ActivityTrendsProps) {
   const dataStart = days[0]?.date ?? "";
   const today = days[days.length - 1]?.date ?? "";
 
@@ -105,8 +91,6 @@ export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = 
   // `custom` is what the date inputs show; `applied` is the last valid pair, which is what gets drawn.
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [applied, setApplied] = useState<{ from: string; to: string } | null>(null);
-  // null = follow the range; a choice sticks for as long as it still fits the range.
-  const [groupChoice, setGroupChoice] = useState<TrendGroup | null>(defaultGroup ?? null);
   const [hidden, setHidden] = useState<ReadonlySet<TrendMetric>>(() => new Set(METRICS.filter((m) => !m.defaultOn).map((m) => m.key)));
 
   const presetRange = (key: PresetKey): { from: string; to: string } => {
@@ -121,7 +105,6 @@ export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = 
   const range =
     preset === "custom" && applied ? { from: applied.from < dataStart ? dataStart : applied.from, to: applied.to > today ? today : applied.to } : presetRange(preset === "custom" ? "all" : preset);
 
-  const group = groupChoice && groupFits(range.from, range.to, groupChoice) ? groupChoice : autoGroup(range.from, range.to);
   const { rows, from, to } = trendWindow(days, range.from, range.to, group, monthlyStars);
   const last = rows[rows.length - 1];
   const partialLast = last !== undefined && periodEnd(last.date, group) >= today;
@@ -150,16 +133,14 @@ export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = 
 
   if (days.length === 0) {
     return (
-      <Card title="Repository activity">
+      <Card title={TITLES[group]}>
         <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
       </Card>
     );
   }
 
   const visible: ChartSeries[] = METRICS.filter((m) => !hidden.has(m.key)).map((m) => ({ key: m.key, label: m.label, color: m.color, type: "line" }));
-  const { unit, title } = GROUPS.find((g) => g.key === group) ?? GROUPS[0];
   const presetOptions = PRESETS.filter((p) => p.key === preset || ((!presets || presets.includes(p.key)) && presetFits(p)));
-  const groupOptions = GROUPS.map((g) => ({ key: g.key, label: g.label, disabled: !groupFits(range.from, range.to, g.key) }));
 
   const formatX = group === "month" ? formatMonth : formatShortDate;
   const formatXLong = (v: string) => {
@@ -171,12 +152,11 @@ export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = 
     // In a row of cards the chart sits at the bottom, so charts line up even when the chips wrap differently.
     <Card
       contentClassName="flex flex-1 flex-col"
-      title={title}
-      subtitle={`New stars, forks, issues, PRs and commits per ${unit}, ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}
+      title={TITLES[group]}
+      subtitle={`New stars, forks, issues, PRs and commits per ${group}, ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}
     >
       <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <Segmented label="Time range" value={preset} options={presetOptions} onChange={pickPreset} />
-        <Segmented label="Group by" value={group} options={groupOptions} onChange={setGroupChoice} />
         {preset === "custom" && (
           <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-1.5 sm:flex sm:w-auto">
             <Input
@@ -243,7 +223,7 @@ export function ActivityTrends({ days, monthlyStars, starsNote, defaultPreset = 
 
         <p className="mt-3 text-xs text-pretty text-muted-foreground">
           Click a metric to show or hide its line; its number is the total for the range.
-          {partialLast && ` The dashed end is the ${unit} still in progress.`}
+          {partialLast && ` The dashed end is the ${group} still in progress.`}
           {starsNote && <> {starsNote}</>}
         </p>
       </div>

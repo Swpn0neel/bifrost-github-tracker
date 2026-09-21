@@ -86,13 +86,3 @@ export function trendWindow(days: TrendRow[], from: string, to: string, group: T
   }
   return { rows, from: lo, to: hi };
 }
-
-/** How many periods a range spans, without building them. */
-export function periodCount(from: string, to: string, group: TrendGroup): number {
-  if (from > to) return 0;
-  if (group === "day") return daysBetween(from, to) + 1;
-  if (group === "week") return daysBetween(periodStart(from, "week"), periodStart(to, "week")) / 7 + 1;
-  const [fy, fm] = from.split("-").map(Number);
-  const [ty, tm] = to.split("-").map(Number);
-  return (ty - fy) * 12 + (tm - fm) + 1;
-}
