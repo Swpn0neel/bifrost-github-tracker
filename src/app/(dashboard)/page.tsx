@@ -8,10 +8,10 @@ import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { env } from "@/lib/env";
 import { formatInt, signed } from "@/lib/format";
-import { dailySeries, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
+import { dailySeries, dataStartDate, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
 import { rollingMean, sumBy } from "@/lib/stats";
-import { formatDate, formatIstDateTime, istDate, monthStart } from "@/lib/time";
-import { dailyTrend, monthlyTrend } from "@/lib/trends";
+import { addDays, formatDate, formatIstDateTime, istDate } from "@/lib/time";
+import { dailyTrend } from "@/lib/trends";
 
 export const dynamic = "force-dynamic";
 
@@ -29,10 +29,11 @@ const WEEK_ROWS: { key: keyof DailyPoint; label: string }[] = [
 
 export default async function OverviewPage() {
   const today = istDate();
-  // Two years of whole months feed the activity trends; the rest of the page reads the last 30 days of it.
-  const [latest, history, first, starEvents] = await Promise.all([latestSnapshot(), dailySeries(monthStart(today, -23), today), firstSnapshot(), hasStarEvents()]);
+  // The whole history feeds the activity trends; the rest of the page reads the last 30 days of it.
+  const monthAgo = addDays(today, -30);
+  const dataStart = await dataStartDate();
+  const [latest, history, first, starEvents] = await Promise.all([latestSnapshot(), dailySeries(dataStart < monthAgo ? dataStart : monthAgo, today), firstSnapshot(), hasStarEvents()]);
   const series = history.slice(-31);
-  const trend = dailyTrend(history, starEvents);
 
   const n = series.length;
   const cur = series[n - 1];
@@ -108,8 +109,7 @@ export default async function OverviewPage() {
       </div>
 
       <ActivityTrends
-        daily={trend.slice(-60)}
-        monthly={monthlyTrend(trend)}
+        days={dailyTrend(history, starEvents)}
         starsNote={starEvents || !first ? undefined : `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`}
       />
 

@@ -28,7 +28,13 @@ interface TimeSeriesChartProps {
   formatY?: (v: number) => string;
   /** Set to false when the caller renders its own legend. */
   legend?: boolean;
+  /** The last row is a period still in progress: lines reach it with a dashed segment. */
+  partialLast?: boolean;
 }
+
+// A line's in-progress tail is plotted as a second, dashed line under this key.
+const tailKey = (key: string) => `${key}__tail`;
+const isNumber = (row: object, key: string) => typeof (row as Record<string, unknown>)[key] === "number";
 
 interface TooltipProps {
   active?: boolean;
@@ -52,7 +58,7 @@ function ChartTooltipBody({ active, label, payload, series, formatXLong, formatV
       <div className="font-medium text-foreground">{formatXLong(String(label ?? ""))}</div>
       <div className="grid gap-1.5">
         {series.map((s) => {
-          const raw = byKey.get(s.key);
+          const raw = byKey.get(s.key) ?? byKey.get(tailKey(s.key));
           const value = typeof raw === "number" ? formatValue(raw) : "—";
           return (
             <div key={s.key} className="flex items-center gap-2 leading-none">
@@ -80,6 +86,7 @@ export function TimeSeriesChart({
   formatXLong = formatDate,
   formatY = defaultFormatY,
   legend = true,
+  partialLast = false,
 }: TimeSeriesChartProps) {
   const gradientPrefix = `area-${useId().replace(/:/g, "")}`;
   const hasBars = series.some((s) => s.type === "bar");
@@ -87,12 +94,31 @@ export function TimeSeriesChart({
   for (const s of series) if (s.stackId) lastInStack.set(s.stackId, s.key);
   const domain: [number | string, number | string] = zeroBased ? [0, "auto"] : ["auto", "auto"];
   const roundedEnd: [number, number, number, number] = [4, 4, 0, 0];
+
+  // Split each line at the second-to-last row: solid up to it, dashed from it to the last one.
+  const lineKeys = series.filter((s) => (s.type ?? "line") === "line").map((s) => s.key);
+  const splitTail = partialLast && data.length >= 2 && lineKeys.length > 0;
+  const plotData = splitTail
+    ? data.map((row, i) => {
+        const out: Record<string, unknown> = { ...row };
+        for (const key of lineKeys) {
+          const value = out[key];
+          out[tailKey(key)] = i >= data.length - 2 ? value : null;
+          if (i === data.length - 1) out[key] = null;
+        }
+        return out;
+      })
+    : data;
+  // A line needs two points; a run with a single known value would otherwise draw nothing.
+  const loneDot = (key: string, color: string) =>
+    plotData.filter((row) => isNumber(row, key)).length === 1 ? { r: 4, fill: color, stroke: "var(--card)", strokeWidth: 2 } : false;
+
   const config: ChartConfig = Object.fromEntries(series.map((s) => [s.key, { label: s.label, color: s.color }]));
 
   return (
     <div>
       <ChartContainer config={config} className="aspect-auto w-full" style={{ height }} initialDimension={{ width: 600, height }} debounce={CHART_RESIZE_SETTLE_MS}>
-        <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%" barGap={2} {...STRETCH_WHILE_RESIZING}>
+        <ComposedChart data={plotData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }} barCategoryGap="25%" barGap={2} {...STRETCH_WHILE_RESIZING}>
           <defs>
             {series
               .filter((s) => s.type === "area")
@@ -164,9 +190,7 @@ export function TimeSeriesChart({
                 />
               );
             }
-            // A line needs two points; a series with a single known value would otherwise draw nothing.
-            const lonePoint = data.filter((row) => typeof (row as Record<string, unknown>)[s.key] === "number").length === 1;
-            return (
+            return [
               <Line
                 key={s.key}
                 type="monotone"
@@ -174,12 +198,28 @@ export function TimeSeriesChart({
                 name={s.label}
                 stroke={s.color}
                 strokeWidth={2}
-                dot={lonePoint ? { r: 4, fill: s.color, stroke: "var(--card)", strokeWidth: 2 } : false}
+                dot={loneDot(s.key, s.color)}
                 activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
                 isAnimationActive={false}
                 connectNulls
-              />
-            );
+              />,
+              splitTail && (
+                <Line
+                  key={tailKey(s.key)}
+                  type="linear"
+                  dataKey={tailKey(s.key)}
+                  name={s.label}
+                  stroke={s.color}
+                  strokeWidth={2}
+                  strokeDasharray="4 4"
+                  dot={loneDot(tailKey(s.key), s.color)}
+                  activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
+                  isAnimationActive={false}
+                  connectNulls
+                  legendType="none"
+                />
+              ),
+            ];
           })}
         </ComposedChart>
       </ChartContainer>

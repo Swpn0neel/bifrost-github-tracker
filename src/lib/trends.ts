@@ -1,10 +1,14 @@
 import type { DailyPoint } from "./queries";
+import { addDays, daysBetween, monthStart, weekday } from "./time";
 
 export const TREND_METRICS = ["stars", "forks", "issues_opened", "issues_closed", "prs_opened", "prs_merged", "commits"] as const;
 export type TrendMetric = (typeof TREND_METRICS)[number];
 
-/** Activity in one period (an IST day or month). `null` means the value is unknown, not zero. */
+/** Activity in one period. `date` is the period's first day; `null` means the value is unknown, not zero. */
 export type TrendRow = { date: string } & Record<TrendMetric, number | null>;
+
+export const TREND_GROUPS = ["day", "week", "month"] as const;
+export type TrendGroup = (typeof TREND_GROUPS)[number];
 
 /**
  * Per-day activity. Without star events a day's star gain is the change between two
@@ -27,22 +31,63 @@ export function dailyTrend(points: DailyPoint[], starEvents: boolean): TrendRow[
   });
 }
 
-/** Rolls days up into calendar months ("YYYY-MM"), dropping the empty months before the repo had any activity. */
-export function monthlyTrend(days: TrendRow[]): TrendRow[] {
-  const months = new Map<string, TrendRow>();
-  for (const day of days) {
-    const key = day.date.slice(0, 7);
-    let row = months.get(key);
-    if (!row) {
-      row = { date: key, stars: null, forks: 0, issues_opened: 0, issues_closed: 0, prs_opened: 0, prs_merged: 0, commits: 0 };
-      months.set(key, row);
+/** First day of the period `date` falls in. Weeks start on Monday. */
+export function periodStart(date: string, group: TrendGroup): string {
+  if (group === "day") return date;
+  if (group === "week") return addDays(date, -((weekday(date) + 6) % 7));
+  return monthStart(date);
+}
+
+/** Last day of the period `date` falls in. */
+export function periodEnd(date: string, group: TrendGroup): string {
+  if (group === "day") return date;
+  if (group === "week") return addDays(periodStart(date, "week"), 6);
+  return addDays(monthStart(date, 1), -1);
+}
+
+export interface TrendWindow {
+  rows: TrendRow[];
+  /** The days actually covered, after widening to whole periods and clamping to the data. */
+  from: string;
+  to: string;
+}
+
+/**
+ * Groups a contiguous run of days (oldest first, one row per day) into periods.
+ * The requested range is widened outwards to whole periods, so the only period that
+ * can be incomplete is the one the data ends in.
+ */
+export function trendWindow(days: TrendRow[], from: string, to: string, group: TrendGroup): TrendWindow {
+  if (days.length === 0) return { rows: [], from, to };
+  const first = days[0].date;
+  const last = days[days.length - 1].date;
+  const clamp = (d: string) => (d < first ? first : d > last ? last : d);
+  const lo = clamp(periodStart(clamp(from), group));
+  const hi = clamp(periodEnd(clamp(to), group));
+  if (lo > hi) return { rows: [], from: lo, to: hi };
+
+  const rows: TrendRow[] = [];
+  for (const day of days.slice(daysBetween(first, lo), daysBetween(first, hi) + 1)) {
+    const key = periodStart(day.date, group);
+    let row = rows[rows.length - 1];
+    if (!row || row.date !== key) {
+      row = { date: key, stars: null, forks: null, issues_opened: null, issues_closed: null, prs_opened: null, prs_merged: null, commits: null };
+      rows.push(row);
     }
     for (const m of TREND_METRICS) {
       const v = day[m];
       if (v !== null) row[m] = (row[m] ?? 0) + v;
     }
   }
-  const rows = [...months.values()];
-  const firstActive = rows.findIndex((r) => TREND_METRICS.some((m) => (r[m] ?? 0) > 0));
-  return firstActive === -1 ? rows : rows.slice(firstActive);
+  return { rows, from: lo, to: hi };
+}
+
+/** How many periods a range spans, without building them. */
+export function periodCount(from: string, to: string, group: TrendGroup): number {
+  if (from > to) return 0;
+  if (group === "day") return daysBetween(from, to) + 1;
+  if (group === "week") return daysBetween(periodStart(from, "week"), periodStart(to, "week")) / 7 + 1;
+  const [fy, fm] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm) + 1;
 }
