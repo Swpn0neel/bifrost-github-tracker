@@ -34,6 +34,8 @@ npm run dev                  # http://localhost:3000
 
 The GitHub token only needs public read access (a fine-grained token with "Public repositories (read-only)" is ideal). Without it the collector still snapshots the headline numbers, but the backfill and event sync are skipped (the anonymous limit is 60 requests/hour). If GitHub rejects the token, the collector logs it and continues anonymously rather than failing.
 
+**Star history before the first snapshot.** GitHub does not expose the stargazer list to a read-only token, so the tracker only measures star gains from its own snapshots. Earlier history can be filled in once from an outside source: `npm run import:stars -- capture.json` loads per-day and per-month star gains (UTC periods) into `external_star_gains`. Snapshots always take precedence, imported values are labelled as estimates in the UI, and the dashboard works the same without them.
+
 ## Railway deployment
 
 Live at https://bifrost-gh-tracker.up.railway.app (project `bifrost-github-tracker`). Two services from the same repo share one Neon database:

@@ -23,16 +23,23 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
   const [series, first, starEvents] = await Promise.all([dailySeries(range.from, range.to), firstSnapshot(), hasStarEvents()]);
 
   const avg7 = rollingMean(
-    series.map((p) => p.new_stars),
+    series.map((p) => (p.new_stars_known ? p.new_stars : null)),
     7,
   );
   const rows = series.map((p, i) => ({
     ...p,
-    // Without star events, reconstructed days have no real star total to plot.
-    stars: starEvents || p.source === "snapshot" ? p.stars : null,
+    // Without star events, a day's star total is only known from a snapshot or an outside estimate.
+    stars: p.stars_known ? p.stars : null,
+    new_stars: p.new_stars_known ? p.new_stars : null,
     avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10,
   }));
   const reconstructedDays = series.filter((p) => p.source === "reconstructed").length;
+  const estimatedStarDays = series.filter((p) => p.stars_estimated).length;
+  const trendshift = (
+    <a href="https://trendshift.io/repositories/14529" target="_blank" rel="noreferrer" className="text-link underline-offset-2 hover:underline">
+      Trendshift
+    </a>
+  );
 
   const totals = {
     stars: sumBy(series, (p) => p.new_stars),
@@ -54,13 +61,14 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
           <>
             One value per IST calendar day. Totals are the last reading before midnight; gains are events with a timestamp inside the day.
             {reconstructedDays > 0 && first && ` ${reconstructedDays} day(s) before ${formatDate(first.ist_date)} are reconstructed from event timestamps.`}
+            {estimatedStarDays > 0 && <> Star figures for {estimatedStarDays} day(s) are estimates from {trendshift} (UTC days).</>}
           </>
         }
       />
       <RangeFilter range={range} basePath="/daily" />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-6">
-        <StatTile icon={<Star />} label={starEvents ? "New stars" : "Net new stars"} value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} ${starEvents ? "unstarred" : "lost"}` : starEvents ? undefined : "From snapshot deltas"} />
+        <StatTile icon={<Star />} label={starEvents ? "New stars" : "Net new stars"} value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} ${starEvents ? "unstarred" : "lost"}` : starEvents ? undefined : estimatedStarDays > 0 ? "Snapshot deltas, plus Trendshift estimates" : "From snapshot deltas"} />
         <StatTile icon={<GitFork />} label="New forks" value={totals.forks} />
         <StatTile icon={<CircleDot />} label="Issues opened / closed" valueText={`${formatInt(totals.issuesOpened)} / ${formatInt(totals.issuesClosed)}`} value={null} />
         <StatTile icon={<GitPullRequest />} label="PRs opened / merged" valueText={`${formatInt(totals.prsOpened)} / ${formatInt(totals.prsMerged)}`} value={null} />
@@ -72,7 +80,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
         <Card title="Stars" subtitle="Total at end of day">
           <TimeSeriesChart data={rows} series={[{ key: "stars", label: "Stars", color: "var(--series-1)", type: "area" }]} zeroBased={false} />
         </Card>
-        <Card title="New stars per day" subtitle={starEvents ? "With trailing 7-day average" : `Net change between daily snapshots, with trailing 7-day average. GitHub does not expose the stargazer list to this token, so star gains are the net change between snapshots.`}>
+        <Card title="New stars per day" subtitle={starEvents ? "With trailing 7-day average" : `Net change between daily snapshots, with trailing 7-day average. GitHub does not expose the stargazer list to this token, so star gains are the net change between snapshots${estimatedStarDays > 0 ? ", or Trendshift's daily estimates before those began" : ""}.`}>
           <TimeSeriesChart
             data={rows}
             series={[

@@ -8,7 +8,7 @@ import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { env } from "@/lib/env";
 import { formatInt, signed } from "@/lib/format";
-import { dailySeries, dataStartDate, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
+import { dailySeries, dataStartDate, externalMonthlyStars, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
 import { rollingMean, sumBy } from "@/lib/stats";
 import { addDays, formatDate, formatIstDateTime, istDate } from "@/lib/time";
 import { dailyTrend } from "@/lib/trends";
@@ -32,7 +32,13 @@ export default async function OverviewPage() {
   // The whole history feeds the activity trends; the rest of the page reads the last 30 days of it.
   const monthAgo = addDays(today, -30);
   const dataStart = await dataStartDate();
-  const [latest, history, first, starEvents] = await Promise.all([latestSnapshot(), dailySeries(dataStart < monthAgo ? dataStart : monthAgo, today), firstSnapshot(), hasStarEvents()]);
+  const [latest, history, first, starEvents, monthlyStars] = await Promise.all([
+    latestSnapshot(),
+    dailySeries(dataStart < monthAgo ? dataStart : monthAgo, today),
+    firstSnapshot(),
+    hasStarEvents(),
+    externalMonthlyStars(),
+  ]);
   const series = history.slice(-31);
 
   const n = series.length;
@@ -43,8 +49,14 @@ export default async function OverviewPage() {
   const hasData = latest !== null || series.some((p) => p.stars > 0 || p.commits_total > 0);
 
   const stars = latest?.stars ?? cur.stars;
-  // Without star events, days before the first snapshot carry no real star total.
-  const trusted = (p: DailyPoint) => starEvents || p.source === "snapshot";
+  // Without star events, a day's star total is only known from a snapshot or an outside estimate.
+  const trusted = (p: DailyPoint) => p.stars_known;
+  const estimated = history.some((p) => p.stars_estimated) || Object.keys(monthlyStars).length > 0;
+  const trendshift = (
+    <a href="https://trendshift.io/repositories/14529" target="_blank" rel="noreferrer" className="text-link underline-offset-2 hover:underline">
+      Trendshift
+    </a>
+  );
   const gain7 = trusted(week) ? stars - week.stars : null;
   const gain30 = trusted(month) ? stars - month.stars : null;
   const perDay7 = gain7 === null ? null : gain7 / 7;
@@ -52,10 +64,10 @@ export default async function OverviewPage() {
   const etaDays = perDay7 !== null && perDay7 > 0 ? Math.ceil((milestone - stars) / perDay7) : null;
 
   const avg7 = rollingMean(
-    series.map((p) => p.new_stars),
+    series.map((p) => (p.new_stars_known ? p.new_stars : null)),
     7,
   );
-  const newStarsData = series.map((p, i) => ({ date: p.date, new_stars: p.new_stars, avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10 }));
+  const newStarsData = series.map((p, i) => ({ date: p.date, new_stars: p.new_stars_known ? p.new_stars : null, avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10 }));
   const totalsData = series.map((p) => ({ date: p.date, stars: trusted(p) ? p.stars : null }));
 
   const thisWeek = series.slice(-7);
@@ -109,15 +121,41 @@ export default async function OverviewPage() {
       </div>
 
       <ActivityTrends
-        days={dailyTrend(history, starEvents)}
-        starsNote={starEvents || !first ? undefined : `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`}
+        days={dailyTrend(history)}
+        monthlyStars={monthlyStars}
+        starsNote={
+          starEvents || !first ? undefined : estimated ? (
+            <>Star gains up to {formatDate(first.ist_date)} are estimates from {trendshift} (UTC days; months only before its daily record starts); after that they are the net change between our daily snapshots.</>
+          ) : (
+            `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`
+          )
+        }
       />
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card title="Stars, last 30 days" subtitle={first ? `Snapshots since ${formatDate(first.ist_date)}${starEvents ? "; earlier days reconstructed from star timestamps" : "; no star history before that (GitHub does not expose the stargazer list to this token)"}` : "No snapshots yet"}>
+        <Card
+          title="Stars, last 30 days"
+          subtitle={
+            !first ? "No snapshots yet" : starEvents ? `Snapshots since ${formatDate(first.ist_date)}; earlier days reconstructed from star timestamps` : estimated ? (
+              <>Snapshots since {formatDate(first.ist_date)}; earlier days counted back from the first snapshot using {trendshift}&apos;s daily star gains (estimate)</>
+            ) : (
+              `Snapshots since ${formatDate(first.ist_date)}; no star history before that (GitHub does not expose the stargazer list to this token)`
+            )
+          }
+        >
           <TimeSeriesChart data={totalsData} series={[{ key: "stars", label: "Stars", color: "var(--series-1)", type: "area" }]} zeroBased={false} />
         </Card>
-        <Card title="New stars per day" subtitle={starEvents ? "Gross new stars by IST calendar day, with a trailing 7-day average" : `Net change between daily snapshots, with a trailing 7-day average. GitHub does not expose the stargazer list to this token, so star gains are the net change between snapshots.`}>
+        <Card
+          title="New stars per day"
+          subtitle={
+            starEvents ? "Gross new stars by IST calendar day, with a trailing 7-day average" : (
+              <>
+                Net change between daily snapshots, with a trailing 7-day average. GitHub does not expose the stargazer list to this token
+                {estimated && first ? <>; days up to {formatDate(first.ist_date)} are estimates from {trendshift} (UTC days)</> : null}.
+              </>
+            )
+          }
+        >
           <TimeSeriesChart
             data={newStarsData}
             series={[

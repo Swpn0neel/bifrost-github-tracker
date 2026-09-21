@@ -10,17 +10,12 @@ export type TrendRow = { date: string } & Record<TrendMetric, number | null>;
 export const TREND_GROUPS = ["day", "week", "month"] as const;
 export type TrendGroup = (typeof TREND_GROUPS)[number];
 
-/**
- * Per-day activity. Without star events a day's star gain is the change between two
- * daily snapshots, so it is only known when that day and the one before both have one.
- */
-export function dailyTrend(points: DailyPoint[], starEvents: boolean): TrendRow[] {
-  return points.map((p, i) => {
-    const prev = points[i - 1];
-    const starsKnown = starEvents || (p.source === "snapshot" && prev?.source === "snapshot");
+/** Per-day activity. A day's star gain is left unknown where nothing measured or estimated it. */
+export function dailyTrend(points: DailyPoint[]): TrendRow[] {
+  return points.map((p) => {
     return {
       date: p.date,
-      stars: starsKnown ? p.new_stars : null,
+      stars: p.new_stars_known ? p.new_stars : null,
       forks: p.new_forks,
       issues_opened: p.issues_opened,
       issues_closed: p.issues_closed,
@@ -56,8 +51,12 @@ export interface TrendWindow {
  * Groups a contiguous run of days (oldest first, one row per day) into periods.
  * The requested range is widened outwards to whole periods, so the only period that
  * can be incomplete is the one the data ends in.
+ *
+ * A period with an unknown day is unknown as a whole: a sum over only the known days
+ * would pass for the full period. `monthlyStars` ("YYYY-MM" -> gain) fills such months
+ * in the month grouping.
  */
-export function trendWindow(days: TrendRow[], from: string, to: string, group: TrendGroup): TrendWindow {
+export function trendWindow(days: TrendRow[], from: string, to: string, group: TrendGroup, monthlyStars: Record<string, number> = {}): TrendWindow {
   if (days.length === 0) return { rows: [], from, to };
   const first = days[0].date;
   const last = days[days.length - 1].date;
@@ -67,17 +66,23 @@ export function trendWindow(days: TrendRow[], from: string, to: string, group: T
   if (lo > hi) return { rows: [], from: lo, to: hi };
 
   const rows: TrendRow[] = [];
+  let unknown = new Set<TrendMetric>();
   for (const day of days.slice(daysBetween(first, lo), daysBetween(first, hi) + 1)) {
     const key = periodStart(day.date, group);
     let row = rows[rows.length - 1];
     if (!row || row.date !== key) {
-      row = { date: key, stars: null, forks: null, issues_opened: null, issues_closed: null, prs_opened: null, prs_merged: null, commits: null };
+      row = { date: key, stars: 0, forks: 0, issues_opened: 0, issues_closed: 0, prs_opened: 0, prs_merged: 0, commits: 0 };
       rows.push(row);
+      unknown = new Set();
     }
     for (const m of TREND_METRICS) {
       const v = day[m];
-      if (v !== null) row[m] = (row[m] ?? 0) + v;
+      if (v === null) unknown.add(m);
+      row[m] = unknown.has(m) ? null : (row[m] ?? 0) + (v ?? 0);
     }
+  }
+  if (group === "month") {
+    for (const row of rows) if (row.stars === null) row.stars = monthlyStars[row.date.slice(0, 7)] ?? null;
   }
   return { rows, from: lo, to: hi };
 }

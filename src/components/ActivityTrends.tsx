@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { Card } from "@/components/Card";
 import { TimeSeriesChart, type ChartSeries } from "@/components/TimeSeriesChart";
@@ -82,11 +82,13 @@ function Segmented<K extends string>({ label, value, options, onChange }: Segmen
 interface ActivityTrendsProps {
   /** One row per IST day, oldest first, with no gaps, ending today. */
   days: TrendRow[];
-  /** Shown when star gains only exist from the first snapshot onwards. */
-  starsNote?: string;
+  /** Star gains per month ("YYYY-MM") for months whose days are not all known. */
+  monthlyStars?: Record<string, number>;
+  /** Caveat about where the star numbers come from. */
+  starsNote?: ReactNode;
 }
 
-export function ActivityTrends({ days, starsNote }: ActivityTrendsProps) {
+export function ActivityTrends({ days, monthlyStars, starsNote }: ActivityTrendsProps) {
   const dataStart = days[0]?.date ?? "";
   const today = days[days.length - 1]?.date ?? "";
 
@@ -110,7 +112,7 @@ export function ActivityTrends({ days, starsNote }: ActivityTrendsProps) {
   const range = preset === "custom" && applied ? { from: applied.from < dataStart ? dataStart : applied.from, to: applied.to > today ? today : applied.to } : presetRange(preset === "custom" ? "all" : preset);
 
   const group = groupChoice && groupFits(range.from, range.to, groupChoice) ? groupChoice : autoGroup(range.from, range.to);
-  const { rows, from, to } = trendWindow(days, range.from, range.to, group);
+  const { rows, from, to } = trendWindow(days, range.from, range.to, group, monthlyStars);
   const last = rows[rows.length - 1];
   const partialLast = last !== undefined && periodEnd(last.date, group) >= today;
 
@@ -228,7 +230,7 @@ export function ActivityTrends({ days, starsNote }: ActivityTrendsProps) {
       <p className="mt-3 text-xs text-pretty text-muted-foreground">
         Click a metric to show or hide its line; its number is the total for the range.
         {partialLast && ` The dashed end is the ${unit} still in progress.`}
-        {starsNote && ` ${starsNote}`}
+        {starsNote && <> {starsNote}</>}
       </p>
     </Card>
   );

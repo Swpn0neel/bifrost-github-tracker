@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS stargazers (
 ALTER TABLE stargazers ADD COLUMN IF NOT EXISTS unstarred_at timestamptz;
 CREATE INDEX IF NOT EXISTS stargazers_starred_idx ON stargazers (starred_at);
 
+-- Star gains per period from an outside source, for history the tracker cannot
+-- measure itself (the stargazer list is closed to our token). Periods are UTC
+-- calendar days or months. Our own snapshots always take precedence.
+CREATE TABLE IF NOT EXISTS external_star_gains (
+  source       text NOT NULL,                               -- e.g. 'trendshift'
+  granularity  text NOT NULL CHECK (granularity IN ('day','month')),
+  period_start date NOT NULL,                               -- UTC; first day of the month for 'month'
+  stars        integer NOT NULL CHECK (stars >= 0),
+  captured_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (source, granularity, period_start)
+);
+
 CREATE TABLE IF NOT EXISTS forks (
   fork_id    bigint PRIMARY KEY,
   owner      text,

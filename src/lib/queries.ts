@@ -260,9 +260,71 @@ function combine(a: Totals, b: Totals, sign: 1 | -1): Totals {
 
 export interface DailyPoint extends DailyActivity, Totals {
   source: "snapshot" | "reconstructed";
+  /** Whether `new_stars` / `stars` mean anything for this day. Without star events they only do where snapshots or an outside source cover it. */
+  new_stars_known: boolean;
+  stars_known: boolean;
+  /** The day's star figures come from an outside source rather than our own readings. */
+  stars_estimated: boolean;
   watchers: number | null;
   discussions: number | null;
   snapshot_at: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Star history from an outside source (see external_star_gains)
+// ---------------------------------------------------------------------------
+
+/** The outside source is optional: a database that predates its table simply has no outside data. */
+async function optionalRows<T>(run: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await run();
+  } catch (err) {
+    if ((err as { code?: string }).code === "42P01") return []; // undefined_table
+    throw err;
+  }
+}
+
+/** Star gains per UTC day, keyed by date. Used as an estimate for the IST day of the same date. */
+export async function externalDailyStars(from: string, to: string): Promise<Map<string, number>> {
+  const rows = await optionalRows(() =>
+    query<{ date: string; stars: number }>(
+      `SELECT DISTINCT ON (period_start) period_start::text AS date, stars
+       FROM external_star_gains WHERE granularity = 'day' AND period_start BETWEEN $1 AND $2
+       ORDER BY period_start, captured_at DESC`,
+      [from, to],
+    ),
+  );
+  return new Map(rows.map((r) => [r.date, r.stars]));
+}
+
+/** Star gains per UTC month, keyed "YYYY-MM". */
+export async function externalMonthlyStars(): Promise<Record<string, number>> {
+  const rows = await optionalRows(() =>
+    query<{ month: string; stars: number }>(
+      `SELECT DISTINCT ON (period_start) to_char(period_start, 'YYYY-MM') AS month, stars
+       FROM external_star_gains WHERE granularity = 'month'
+       ORDER BY period_start, captured_at DESC`,
+    ),
+  );
+  return Object.fromEntries(rows.map((r) => [r.month, r.stars]));
+}
+
+/**
+ * End-of-day star totals for the days before our first snapshot, counted back from
+ * that snapshot through the outside daily gains for as long as they run without a gap.
+ */
+async function estimatedStarTotals(): Promise<Map<string, number>> {
+  const totals = new Map<string, number>();
+  const first = await firstSnapshot();
+  if (!first) return totals;
+  const [close] = await dayCloseSnapshots(first.ist_date, first.ist_date);
+  const gains = await externalDailyStars("1970-01-01", first.ist_date);
+  let total = close?.stars ?? first.stars;
+  for (let day = first.ist_date; gains.has(day); day = addDays(day, -1)) {
+    total -= gains.get(day) ?? 0;
+    totals.set(addDays(day, -1), total);
+  }
+  return totals;
 }
 
 /**
@@ -271,11 +333,13 @@ export interface DailyPoint extends DailyActivity, Totals {
  * the two sources join without a visible step.
  */
 export async function dailySeries(from: string, to: string): Promise<DailyPoint[]> {
-  const [activity, closes, base, starEvents] = await Promise.all([
+  const [activity, closes, base, starEvents, outsideGains, outsideTotals] = await Promise.all([
     dailyActivity(from, to),
     dayCloseSnapshots(from, to),
     totalsAt(istMidnightUtc(from)),
     hasStarEvents(),
+    externalDailyStars(from, to),
+    estimatedStarTotals(),
   ]);
   const closeByDate = new Map(closes.map((c) => [c.date, c]));
 
@@ -300,6 +364,9 @@ export async function dailySeries(from: string, to: string): Promise<DailyPoint[
         ...a,
         ...snapshotTotals(s, recon[i]),
         source: "snapshot",
+        new_stars_known: starEvents,
+        stars_known: true,
+        stars_estimated: false,
         watchers: s.watchers,
         discussions: s.discussions,
         snapshot_at: s.captured_at.toISOString(),
@@ -309,22 +376,36 @@ export async function dailySeries(from: string, to: string): Promise<DailyPoint[
       ...a,
       ...combine(recon[i], offset, 1),
       source: "reconstructed",
+      new_stars_known: starEvents,
+      stars_known: starEvents,
+      stars_estimated: false,
       watchers: null,
       discussions: null,
       snapshot_at: null,
     };
   });
 
-  // Without a stargazer list, the only star signal is the net change between
-  // consecutive daily snapshots.
+  // Without a stargazer list, the star signal is the net change between consecutive
+  // daily snapshots; where those are missing, an outside source fills in as an estimate.
   if (!starEvents) {
-    for (let i = 1; i < points.length; i++) {
+    for (let i = 0; i < points.length; i++) {
       const p = points[i];
       const prev = points[i - 1];
-      if (p.source === "snapshot" && prev.source === "snapshot") {
+      if (p.source === "snapshot" && prev?.source === "snapshot") {
         const diff = p.stars - prev.stars;
         p.new_stars = Math.max(diff, 0);
         p.unstars = Math.max(-diff, 0);
+        p.new_stars_known = true;
+      } else if (outsideGains.has(p.date)) {
+        p.new_stars = outsideGains.get(p.date) ?? 0;
+        p.unstars = 0;
+        p.new_stars_known = true;
+        p.stars_estimated = true;
+      }
+      if (p.source !== "snapshot" && outsideTotals.has(p.date)) {
+        p.stars = outsideTotals.get(p.date) ?? p.stars;
+        p.stars_known = true;
+        p.stars_estimated = true;
       }
     }
   }
