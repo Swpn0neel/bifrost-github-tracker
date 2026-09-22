@@ -224,8 +224,12 @@ export interface TrackedRepoSyncResult {
 
 /**
  * Event history for the compared repos: an incremental sync for each one already loaded,
- * and one full load per cron run for a repo that is not yet (a full walk of a large repo
- * takes minutes, so manual refreshes leave it to the schedule).
+ * and one initial load per cron run for a repo that is not yet (loading a large repo takes
+ * minutes, so manual refreshes leave it to the schedule).
+ *
+ * The initial load is the incremental sync too: with no cursor saved it walks each endpoint
+ * from the beginning, and a step that failed last time (its cursor never saved) is simply
+ * walked again next run while the steps that succeeded carry on from their cursors.
  */
 export async function syncTrackedRepos(gh: GitHubClient, log: Log, repos: SnapshottedRepo[], { allowBackfill }: { allowBackfill: boolean }): Promise<TrackedRepoSyncResult> {
   const result: TrackedRepoSyncResult = { synced: [], backfilled: null, waiting: [], errors: [] };
@@ -240,8 +244,8 @@ export async function syncTrackedRepos(gh: GitHubClient, log: Log, repos: Snapsh
       continue;
     }
     const client = gh.forRepo(repo.full_name);
-    log(`compare ${repo.full_name}: ${covered ? "incremental event sync" : "full event backfill"}`);
-    const sync = await runSync(client, log, { repo: { default_branch: repo.default_branch }, full: !covered, fullStars: false });
+    log(`compare ${repo.full_name}: ${covered ? "incremental event sync" : "initial event load"}`);
+    const sync = await runSync(client, log, { repo: { default_branch: repo.default_branch }, full: false, fullStars: false });
     for (const e of sync.errors) result.errors.push(`${repo.full_name} ${e}`);
     if (covered) result.synced.push(repo.full_name);
     else if (sync.errors.length === 0) {

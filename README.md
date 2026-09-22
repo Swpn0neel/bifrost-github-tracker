@@ -47,11 +47,13 @@ It reads the repository page once and loads the periods (UTC) into `external_gai
 
 The **Compare** page tracks any public repository next to Bifrost. Adding one (`owner/name` or a GitHub URL) takes its first reading immediately; after that every collector run reads it too, right after Bifrost, in one GraphQL request plus two REST count requests per repository.
 
-Compared repositories get the same event history as Bifrost: the first cron run after one is added walks all of its issues, pull requests, commits, forks and releases (one repository per run, since a large one takes a few minutes and a few hundred to a thousand requests), and every later run syncs the new events. From then on its daily forks, issues, PRs, commits, contributors and releases are exact back to the repository's creation, reconstructed from event timestamps exactly as for Bifrost. Until that first walk has happened, its daily activity is the change between consecutive day-close readings, with the outside source (above) filling in earlier days. To load one right away instead of waiting for the schedule:
+Compared repositories get the same event history as Bifrost: the first cron run after one is added walks all of its issues, pull requests, commits, forks and releases (one repository per run, since a large one takes a few minutes and a few hundred to a thousand requests), and every later run syncs the new events. From then on its daily forks, issues, PRs, commits, contributors and releases are exact back to the repository's creation, reconstructed from event timestamps exactly as for Bifrost. Until that first walk has happened, its daily activity is the change between consecutive day-close readings, with the outside source (above) filling in earlier days. A walk cut short is resumed by the next run: a step that finished carries on from its cursor, one that did not starts over. To load or resume one right away instead of waiting for the schedule:
 
 ```bash
-npm run backfill -- owner/name
+npm run sync -- owner/name
 ```
+
+(`npm run backfill -- owner/name` re-walks every endpoint even where a cursor exists, for repairs.) GitHub only serves the first ~10,000 rows of a list by page number; past that the client follows the cursor links GitHub returns.
 
 Stars are the exception for every repository, Bifrost included: GitHub hides the stargazer list, so daily star gains come from our readings from the day a repository was added, from the outside source before that (about 60 days), and only per month further back (about two years). The compare views draw the last two years.
 

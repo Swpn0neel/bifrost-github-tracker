@@ -61,6 +61,12 @@ export function parseLastPage(link: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** The URL GitHub says to fetch next, from the Link header; null on the last page. */
+export function parseNextUrl(link: string | null): string | null {
+  const match = link?.match(/<([^>]+)>;\s*rel="next"/);
+  return match ? match[1] : null;
+}
+
 /** Counters shared by every client of one run, so a run's API-call total covers all the repos it touched. */
 interface ClientState {
   calls: number;
@@ -170,20 +176,29 @@ export class GitHubClient {
     }
   }
 
-  /** Iterate a paginated list endpoint. Yields one page at a time. */
+  /**
+   * Iterate a paginated list endpoint. Yields one page at a time. The first request
+   * names its page; after that the Link header's "next" URL is followed as given, since
+   * on large datasets GitHub replaces page numbers with cursors ("after=") and rejects
+   * page= past roughly the 10,000th row with a 422.
+   */
   async *pages<T>(
     path: string,
     { params = {}, accept, startPage = 1, maxPages = Number.POSITIVE_INFINITY, perPage = 100 }: PageOptions = {},
   ): AsyncGenerator<{ page: number; items: T[]; lastPage: number | null }> {
     let page = startPage;
     let lastPage: number | null = null;
+    let next: string | null = null;
     while (page - startPage < maxPages) {
-      const { data, headers } = await this.request<T[]>(path, { params: { ...params, per_page: perPage, page }, accept });
+      const { data, headers } = next
+        ? await this.request<T[]>(next, { accept })
+        : await this.request<T[]>(path, { params: { ...params, per_page: perPage, page }, accept });
       const link = headers.get("link");
       const last = parseLastPage(link);
       if (last !== null) lastPage = last;
       yield { page, items: data, lastPage };
-      if (!/rel="next"/.test(link ?? "") || data.length === 0) break;
+      next = parseNextUrl(link);
+      if (!next || data.length === 0) break;
       page++;
     }
   }

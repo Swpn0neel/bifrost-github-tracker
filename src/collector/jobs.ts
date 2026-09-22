@@ -144,14 +144,24 @@ export function runBackfillJob(triggeredBy: Trigger = "manual", repoName?: strin
   });
 }
 
-/** Incremental event sync without a snapshot. */
-export function runSyncJob(triggeredBy: Trigger = "manual"): Promise<JobResult> {
-  return withRun("sync", triggeredBy, async ({ gh, log }) => {
+/**
+ * Incremental event sync without a snapshot, for the primary repo or a compared one. For a
+ * compared repo whose earlier load was cut short this finishes the job: steps without a saved
+ * cursor are walked from the beginning, the others carry on from theirs.
+ */
+export function runSyncJob(triggeredBy: Trigger = "manual", repoName?: string): Promise<JobResult> {
+  return withRun("sync", triggeredBy, async ({ gh: primary, log }) => {
+    const compared = repoName !== undefined && repoName.toLowerCase() !== env.repo.toLowerCase();
+    const gh = compared ? primary.forRepo(repoName) : primary;
     const repo = await gh.repoInfo();
     const sync = await runSync(gh, log, { repo, full: false, fullStars: false });
+    if (compared && sync.errors.length === 0 && (await getState(backfilledKey(gh.fullName))) === null) {
+      await setState(backfilledKey(gh.fullName), new Date().toISOString());
+      log(`${gh.fullName}: event history complete`);
+    }
     return {
       status: sync.errors.length ? "partial" : "ok",
-      detail: { sync: sync.counts, syncErrors: sync.errors },
+      detail: { repo: gh.fullName, sync: sync.counts, syncErrors: sync.errors },
     };
   });
 }
