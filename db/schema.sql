@@ -204,8 +204,6 @@ CREATE INDEX IF NOT EXISTS repo_snapshots_repo_idx ON repo_snapshots (repo_id, i
 -- Activity per period from an outside source (Trendshift), for history before a
 -- repo's first snapshot. Periods are UTC days or months. A null metric means the
 -- source did not report it. Our own readings always take precedence.
--- Replaces external_star_gains, which held stars for the primary repo only; that
--- table is left in place until the code that read it is no longer deployed.
 CREATE TABLE IF NOT EXISTS external_gains (
   repo          text NOT NULL,                                -- owner/name
   source        text NOT NULL,                                -- e.g. 'trendshift'
@@ -219,12 +217,3 @@ CREATE TABLE IF NOT EXISTS external_gains (
   captured_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (repo, source, granularity, period_start)
 );
--- Carry the primary repo's star history over from the table this replaces.
-DO $$
-BEGIN
-  IF to_regclass('external_star_gains') IS NOT NULL THEN
-    INSERT INTO external_gains (repo, source, granularity, period_start, stars, captured_at)
-    SELECT 'maximhq/bifrost', source, granularity, period_start, stars, captured_at FROM external_star_gains
-    ON CONFLICT (repo, source, granularity, period_start) DO NOTHING;
-  END IF;
-END $$;
