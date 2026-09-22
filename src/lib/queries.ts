@@ -32,6 +32,12 @@ export interface SnapshotRow {
   size_kb: number | null;
 }
 
+/** The counts both snapshot tables share; what the daily series is built from. */
+export type CountsRow = Pick<
+  SnapshotRow,
+  "captured_at" | "stars" | "forks" | "watchers" | "open_issues" | "closed_issues" | "open_prs" | "merged_prs" | "closed_prs" | "contributors" | "commits" | "releases" | "discussions"
+>;
+
 const SNAPSHOT_COLS = `s.id, s.captured_at, s.ist_date::text AS ist_date, s.slot, s.triggered_by,
   s.stars, s.forks, s.watchers, s.open_issues, s.closed_issues, s.open_prs, s.merged_prs, s.closed_prs,
   s.contributors, s.commits, s.releases, s.discussions, s.size_kb`;
@@ -44,24 +50,48 @@ export function firstSnapshot(): Promise<SnapshotRow | null> {
   return queryOne<SnapshotRow>(`SELECT ${SNAPSHOT_COLS} FROM snapshots s ORDER BY s.captured_at ASC LIMIT 1`);
 }
 
-/** True when the stargazers table has rows, i.e. GitHub let this token list stars. */
-export async function hasStarEvents(): Promise<boolean> {
-  const row = await queryOne<{ n: number }>("SELECT count(*)::int AS n FROM stargazers");
+/** The repository the dashboard is about; every other one is compared against it. */
+export const isPrimary = (repo: string) => repo.toLowerCase() === env.repo.toLowerCase();
+
+/** True when the stargazers table has rows for the repo, i.e. GitHub let this token list its stars. */
+export async function hasStarEvents(repo: string = env.repo): Promise<boolean> {
+  const row = await queryOne<{ n: number }>("SELECT count(*)::int AS n FROM stargazers WHERE repo = $1", [repo]);
   return (row?.n ?? 0) > 0;
 }
 
-/** Earliest IST date we have any data for (events or snapshots). */
-export async function dataStartDate(): Promise<string> {
+/** Earliest IST date the repo's event tables reach back to, or null when it has no events. */
+export async function eventsStartDate(repo: string = env.repo): Promise<string | null> {
   const row = await queryOne<{ d: string | null }>(
     `SELECT to_char(${IST(`LEAST(
-       (SELECT min(starred_at) FROM stargazers),
-       (SELECT min(created_at) FROM forks),
-       (SELECT min(created_at) FROM issues),
-       (SELECT min(committed_at) FROM commits),
-       (SELECT min(captured_at) FROM snapshots)
+       (SELECT min(starred_at) FROM stargazers WHERE repo = $1),
+       (SELECT min(created_at) FROM forks WHERE repo = $1),
+       (SELECT min(created_at) FROM issues WHERE repo = $1),
+       (SELECT min(committed_at) FROM commits WHERE repo = $1)
      )`)}, 'YYYY-MM-DD') AS d`,
+    [repo],
   );
-  return row?.d ?? addDays(istDate(), -30);
+  return row?.d ?? null;
+}
+
+/**
+ * Whether the repo's events have been loaded in full, so a day with no events really
+ * was quiet. The primary repo is backfilled at setup; a compared repo is backfilled by
+ * the first cron run after it was added, which records it here.
+ */
+export async function eventsCovered(repo: string): Promise<boolean> {
+  if (isPrimary(repo)) return true;
+  const row = await queryOne<{ value: string }>("SELECT value FROM sync_state WHERE key = $1", [`events_backfilled_at:${repo}`]);
+  return row !== null;
+}
+
+/** Earliest IST date we have any data for the primary repo (events or snapshots). */
+export async function dataStartDate(): Promise<string> {
+  const [events, snap] = await Promise.all([
+    eventsStartDate(env.repo),
+    queryOne<{ d: string | null }>(`SELECT to_char(${IST("min(captured_at)")}, 'YYYY-MM-DD') AS d FROM snapshots`),
+  ]);
+  const candidates = [events, snap?.d].filter((d): d is string => Boolean(d)).sort();
+  return candidates[0] ?? addDays(istDate(), -30);
 }
 
 /**
@@ -93,6 +123,71 @@ export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRo
 }
 
 // ---------------------------------------------------------------------------
+// Snapshots of the repositories on the Compare page (repo_snapshots)
+// ---------------------------------------------------------------------------
+
+export interface RepoSnapshotRow extends CountsRow {
+  id: number;
+  repo_id: number;
+  ist_date: string;
+  slot: Slot;
+  triggered_by: string;
+}
+
+const REPO_SNAP_COLS = `s.id, s.repo_id, s.captured_at, s.ist_date::text AS ist_date, s.slot, s.triggered_by,
+  s.stars, s.forks, s.watchers, s.open_issues, s.closed_issues, s.open_prs, s.merged_prs, s.closed_prs,
+  s.contributors, s.commits, s.releases, s.discussions`;
+
+export function latestRepoSnapshot(repoId: number): Promise<RepoSnapshotRow | null> {
+  return queryOne<RepoSnapshotRow>(`SELECT ${REPO_SNAP_COLS} FROM repo_snapshots s WHERE s.repo_id = $1 ORDER BY s.captured_at DESC LIMIT 1`, [repoId]);
+}
+
+export function firstRepoSnapshot(repoId: number): Promise<RepoSnapshotRow | null> {
+  return queryOne<RepoSnapshotRow>(`SELECT ${REPO_SNAP_COLS} FROM repo_snapshots s WHERE s.repo_id = $1 ORDER BY s.captured_at ASC LIMIT 1`, [repoId]);
+}
+
+/** The close-of-day reading per day of a compared repo, by the same rule as dayCloseSnapshots. */
+export function repoDayCloseSnapshots(repoId: number, from: string, to: string): Promise<(RepoSnapshotRow & { date: string })[]> {
+  return query<RepoSnapshotRow & { date: string }>(
+    `WITH days AS (SELECT generate_series($2::date, $3::date, interval '1 day')::date AS d)
+     SELECT DISTINCT ON (days.d) days.d::text AS date, ${REPO_SNAP_COLS}
+     FROM days
+     JOIN repo_snapshots s
+       ON s.repo_id = $1 AND (
+         (${SCHEDULED} AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0)))
+         OR (NOT ${SCHEDULED} AND s.ist_date = days.d))
+     ORDER BY days.d, ${SCHEDULED} DESC, s.ist_date DESC, s.slot DESC, s.captured_at DESC`,
+    [repoId, from, to],
+  );
+}
+
+export async function repoSnapshotCount(): Promise<number> {
+  const row = await queryOne<{ n: number }>("SELECT count(*)::int AS n FROM repo_snapshots");
+  return row?.n ?? 0;
+}
+
+/** The tracked_repos id for a compared repo's name, or null (also for the primary repo, which has none). */
+export async function trackedRepoId(repo: string): Promise<number | null> {
+  const row = await queryOne<{ id: number }>("SELECT id FROM tracked_repos WHERE lower(full_name) = lower($1)", [repo]);
+  return row?.id ?? null;
+}
+
+type CloseRow = CountsRow & { date: string; ist_date: string };
+
+/** Day-close readings for any repo: the primary one's snapshots, or a compared repo's. */
+async function dayClosesFor(repo: string, from: string, to: string): Promise<CloseRow[]> {
+  if (isPrimary(repo)) return dayCloseSnapshots(from, to);
+  const id = await trackedRepoId(repo);
+  return id === null ? [] : repoDayCloseSnapshots(id, from, to);
+}
+
+async function firstSnapshotFor(repo: string): Promise<{ ist_date: string; stars: number; forks: number } | null> {
+  if (isPrimary(repo)) return firstSnapshot();
+  const id = await trackedRepoId(repo);
+  return id === null ? null : firstRepoSnapshot(id);
+}
+
+// ---------------------------------------------------------------------------
 // Event-derived activity (gross counts per IST day / slot)
 // ---------------------------------------------------------------------------
 
@@ -119,21 +214,23 @@ export interface SlotActivity extends Activity {
   slot: Slot;
 }
 
-const NEW_CONTRIBUTORS_SRC = `(SELECT author_login, min(committed_at) AS first_at FROM commits WHERE author_login IS NOT NULL GROUP BY 1)`;
+// $5 is the repository. The new-contributors subquery filters inside, since its rows have no repo column.
+const NEW_CONTRIBUTORS_SRC = `(SELECT author_login, min(committed_at) AS first_at FROM commits WHERE author_login IS NOT NULL AND repo = $5 GROUP BY 1)`;
+const R = "repo = $5";
 
 // [alias, source table/subquery, timestamp column, extra predicate]
 const ACTIVITY_SOURCES: [keyof Activity, string, string, string][] = [
-  ["new_stars", "stargazers", "starred_at", "TRUE"],
-  ["unstars", "stargazers", "unstarred_at", "unstarred_at IS NOT NULL"],
-  ["new_forks", "forks", "created_at", "TRUE"],
-  ["issues_opened", "issues", "created_at", "NOT is_pr"],
-  ["issues_closed", "issues", "closed_at", "NOT is_pr"],
-  ["prs_opened", "issues", "created_at", "is_pr"],
-  ["prs_merged", "issues", "merged_at", "is_pr"],
-  ["prs_closed", "issues", "closed_at", "is_pr AND merged_at IS NULL"],
-  ["commits", "commits", "committed_at", "TRUE"],
+  ["new_stars", "stargazers", "starred_at", R],
+  ["unstars", "stargazers", "unstarred_at", `unstarred_at IS NOT NULL AND ${R}`],
+  ["new_forks", "forks", "created_at", R],
+  ["issues_opened", "issues", "created_at", `NOT is_pr AND ${R}`],
+  ["issues_closed", "issues", "closed_at", `NOT is_pr AND ${R}`],
+  ["prs_opened", "issues", "created_at", `is_pr AND ${R}`],
+  ["prs_merged", "issues", "merged_at", `is_pr AND ${R}`],
+  ["prs_closed", "issues", "closed_at", `is_pr AND merged_at IS NULL AND ${R}`],
+  ["commits", "commits", "committed_at", R],
   ["new_contributors", NEW_CONTRIBUTORS_SRC + " nc_src", "first_at", "TRUE"],
-  ["releases_published", "releases", "published_at", "NOT draft"],
+  ["releases_published", "releases", "published_at", `NOT draft AND ${R}`],
 ];
 
 function activitySql(granularity: "day" | "slot"): string {
@@ -160,16 +257,16 @@ function activitySql(granularity: "day" | "slot"): string {
 const DAILY_ACTIVITY_SQL = activitySql("day");
 const SLOT_ACTIVITY_SQL = activitySql("slot");
 
-function rangeBounds(from: string, to: string): [string, string, Date, Date] {
-  return [from, to, istMidnightUtc(from), istMidnightUtc(addDays(to, 1))];
+function rangeBounds(from: string, to: string, repo: string): [string, string, Date, Date, string] {
+  return [from, to, istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), repo];
 }
 
-export function dailyActivity(from: string, to: string): Promise<DailyActivity[]> {
-  return query<DailyActivity>(DAILY_ACTIVITY_SQL, rangeBounds(from, to));
+export function dailyActivity(from: string, to: string, repo: string = env.repo): Promise<DailyActivity[]> {
+  return query<DailyActivity>(DAILY_ACTIVITY_SQL, rangeBounds(from, to, repo));
 }
 
-export function slotActivity(from: string, to: string): Promise<SlotActivity[]> {
-  return query<SlotActivity>(SLOT_ACTIVITY_SQL, rangeBounds(from, to));
+export function slotActivity(from: string, to: string, repo: string = env.repo): Promise<SlotActivity[]> {
+  return query<SlotActivity>(SLOT_ACTIVITY_SQL, rangeBounds(from, to, repo));
 }
 
 // ---------------------------------------------------------------------------
@@ -205,20 +302,20 @@ const ZERO_TOTALS: Totals = {
 const TOTAL_KEYS = Object.keys(ZERO_TOTALS) as (keyof Totals)[];
 
 /** Totals implied by the event tables at a UTC instant. */
-export async function totalsAt(at: Date): Promise<Totals> {
+export async function totalsAt(at: Date, repo: string = env.repo): Promise<Totals> {
   const row = await queryOne<Totals>(
     `SELECT
-      (SELECT count(*) FROM stargazers WHERE starred_at < $1 AND (unstarred_at IS NULL OR unstarred_at >= $1))::int AS stars,
-      (SELECT count(*) FROM forks WHERE created_at < $1)::int AS forks,
-      (SELECT count(*) FROM issues WHERE NOT is_pr AND created_at < $1 AND (closed_at IS NULL OR closed_at >= $1))::int AS open_issues,
-      (SELECT count(*) FROM issues WHERE NOT is_pr AND closed_at < $1)::int AS closed_issues,
-      (SELECT count(*) FROM issues WHERE is_pr AND created_at < $1 AND (closed_at IS NULL OR closed_at >= $1))::int AS open_prs,
-      (SELECT count(*) FROM issues WHERE is_pr AND merged_at < $1)::int AS merged_prs,
-      (SELECT count(*) FROM issues WHERE is_pr AND merged_at IS NULL AND closed_at < $1)::int AS closed_prs,
-      (SELECT count(*) FROM commits WHERE committed_at < $1)::int AS commits_total,
-      (SELECT count(DISTINCT author_login) FROM commits WHERE author_login IS NOT NULL AND committed_at < $1)::int AS contributors,
-      (SELECT count(*) FROM releases WHERE NOT draft AND published_at < $1)::int AS releases_total`,
-    [at],
+      (SELECT count(*) FROM stargazers WHERE repo = $2 AND starred_at < $1 AND (unstarred_at IS NULL OR unstarred_at >= $1))::int AS stars,
+      (SELECT count(*) FROM forks WHERE repo = $2 AND created_at < $1)::int AS forks,
+      (SELECT count(*) FROM issues WHERE repo = $2 AND NOT is_pr AND created_at < $1 AND (closed_at IS NULL OR closed_at >= $1))::int AS open_issues,
+      (SELECT count(*) FROM issues WHERE repo = $2 AND NOT is_pr AND closed_at < $1)::int AS closed_issues,
+      (SELECT count(*) FROM issues WHERE repo = $2 AND is_pr AND created_at < $1 AND (closed_at IS NULL OR closed_at >= $1))::int AS open_prs,
+      (SELECT count(*) FROM issues WHERE repo = $2 AND is_pr AND merged_at < $1)::int AS merged_prs,
+      (SELECT count(*) FROM issues WHERE repo = $2 AND is_pr AND merged_at IS NULL AND closed_at < $1)::int AS closed_prs,
+      (SELECT count(*) FROM commits WHERE repo = $2 AND committed_at < $1)::int AS commits_total,
+      (SELECT count(DISTINCT author_login) FROM commits WHERE repo = $2 AND author_login IS NOT NULL AND committed_at < $1)::int AS contributors,
+      (SELECT count(*) FROM releases WHERE repo = $2 AND NOT draft AND published_at < $1)::int AS releases_total`,
+    [at, repo],
   );
   return row ?? { ...ZERO_TOTALS };
 }
@@ -238,7 +335,7 @@ function advance(t: Totals, a: Activity): Totals {
   };
 }
 
-function snapshotTotals(s: SnapshotRow, fallback: Totals): Totals {
+function snapshotTotals(s: CountsRow, fallback: Totals): Totals {
   return {
     stars: s.stars,
     forks: s.forks,
@@ -261,6 +358,8 @@ function combine(a: Totals, b: Totals, sign: 1 | -1): Totals {
 
 export interface DailyPoint extends DailyActivity, Totals {
   source: "snapshot" | "reconstructed";
+  /** False while the repo's events have not been loaded yet: its zero activity is then absence of data, not a quiet day. */
+  activity_known: boolean;
   /** Whether `new_stars` / `stars` mean anything for this day. Without star events they only do where snapshots or an outside source cover it. */
   new_stars_known: boolean;
   stars_known: boolean;
@@ -286,26 +385,26 @@ async function optionalRows<T>(run: () => Promise<T[]>): Promise<T[]> {
 }
 
 /** Star gains per UTC day, keyed by date. Used as an estimate for the IST day of the same date. */
-export async function externalDailyStars(from: string, to: string): Promise<Map<string, number>> {
+export async function externalDailyStars(from: string, to: string, repo: string = env.repo): Promise<Map<string, number>> {
   const rows = await optionalRows(() =>
     query<{ date: string; stars: number }>(
       `SELECT DISTINCT ON (period_start) period_start::text AS date, stars
        FROM external_gains WHERE repo = $3 AND granularity = 'day' AND stars IS NOT NULL AND period_start BETWEEN $1 AND $2
        ORDER BY period_start, captured_at DESC`,
-      [from, to, env.repo],
+      [from, to, repo],
     ),
   );
   return new Map(rows.map((r) => [r.date, r.stars]));
 }
 
 /** Star gains per UTC month, keyed "YYYY-MM". */
-export async function externalMonthlyStars(): Promise<Record<string, number>> {
+export async function externalMonthlyStars(repo: string = env.repo): Promise<Record<string, number>> {
   const rows = await optionalRows(() =>
     query<{ month: string; stars: number }>(
       `SELECT DISTINCT ON (period_start) to_char(period_start, 'YYYY-MM') AS month, stars
        FROM external_gains WHERE repo = $1 AND granularity = 'month' AND stars IS NOT NULL
        ORDER BY period_start, captured_at DESC`,
-      [env.repo],
+      [repo],
     ),
   );
   return Object.fromEntries(rows.map((r) => [r.month, r.stars]));
@@ -315,14 +414,22 @@ export async function externalMonthlyStars(): Promise<Record<string, number>> {
  * End-of-day star totals for the days before our first snapshot, counted back from
  * that snapshot through the outside daily gains for as long as they run without a gap.
  */
-async function estimatedStarTotals(): Promise<Map<string, number>> {
+export async function estimatedStarTotals(repo: string = env.repo): Promise<Map<string, number>> {
   const totals = new Map<string, number>();
-  const first = await firstSnapshot();
+  const first = await firstSnapshotFor(repo);
   if (!first) return totals;
-  const [close] = await dayCloseSnapshots(first.ist_date, first.ist_date);
-  const gains = await externalDailyStars("1970-01-01", first.ist_date);
+  const [close] = await dayClosesFor(repo, first.ist_date, first.ist_date);
+  const gains = await externalDailyStars("1970-01-01", first.ist_date, repo);
   let total = close?.stars ?? first.stars;
-  for (let day = first.ist_date; gains.has(day); day = addDays(day, -1)) {
+  let day = first.ist_date;
+  // The outside source cannot have the first reading's own day yet when the repo was added
+  // that day, so the reading stands in for the previous day's close (off by the part of the
+  // day before the reading); importing that day later replaces the guess.
+  if (!gains.has(day)) {
+    totals.set(addDays(day, -1), total);
+    day = addDays(day, -1);
+  }
+  for (; gains.has(day); day = addDays(day, -1)) {
     total -= gains.get(day) ?? 0;
     totals.set(addDays(day, -1), total);
   }
@@ -334,14 +441,15 @@ async function estimatedStarTotals(): Promise<Map<string, number>> {
  * reconstructed from event timestamps and anchored to the nearest snapshot so
  * the two sources join without a visible step.
  */
-export async function dailySeries(from: string, to: string): Promise<DailyPoint[]> {
-  const [activity, closes, base, starEvents, outsideGains, outsideTotals] = await Promise.all([
-    dailyActivity(from, to),
-    dayCloseSnapshots(from, to),
-    totalsAt(istMidnightUtc(from)),
-    hasStarEvents(),
-    externalDailyStars(from, to),
-    estimatedStarTotals(),
+export async function dailySeries(from: string, to: string, repo: string = env.repo): Promise<DailyPoint[]> {
+  const [activity, closes, base, starEvents, outsideGains, outsideTotals, covered] = await Promise.all([
+    dailyActivity(from, to, repo),
+    dayClosesFor(repo, from, to),
+    totalsAt(istMidnightUtc(from), repo),
+    hasStarEvents(repo),
+    externalDailyStars(from, to, repo),
+    estimatedStarTotals(repo),
+    eventsCovered(repo),
   ]);
   const closeByDate = new Map(closes.map((c) => [c.date, c]));
 
@@ -366,6 +474,7 @@ export async function dailySeries(from: string, to: string): Promise<DailyPoint[
         ...a,
         ...snapshotTotals(s, recon[i]),
         source: "snapshot",
+        activity_known: covered,
         new_stars_known: starEvents,
         stars_known: true,
         stars_estimated: false,
@@ -378,6 +487,7 @@ export async function dailySeries(from: string, to: string): Promise<DailyPoint[
       ...a,
       ...combine(recon[i], offset, 1),
       source: "reconstructed",
+      activity_known: covered,
       new_stars_known: starEvents,
       stars_known: starEvents,
       stars_estimated: false,
@@ -496,8 +606,8 @@ export function slotWeekdayCounts(from: string, to: string, metric: HeatmapMetri
   const [table, col, where] = HEATMAP_SOURCES[metric];
   return query(
     `SELECT extract(dow from ${IST(col)})::int AS dow, ${SLOT(col)} AS slot, count(*)::int AS n
-     FROM ${table} WHERE ${where} AND ${col} >= $1 AND ${col} < $2 GROUP BY 1, 2`,
-    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1))],
+     FROM ${table} WHERE repo = $3 AND ${where} AND ${col} >= $1 AND ${col} < $2 GROUP BY 1, 2`,
+    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), env.repo],
   );
 }
 
@@ -523,8 +633,8 @@ export async function issueStats(from: string, to: string): Promise<IssueStats> 
         FILTER (WHERE is_pr AND merged_at >= $1 AND merged_at < $2) AS median_pr_merge_days,
       count(*) FILTER (WHERE is_pr AND merged_at >= $1 AND merged_at < $2)::int AS prs_merged_n,
       count(*) FILTER (WHERE is_pr AND merged_at IS NULL AND closed_at >= $1 AND closed_at < $2)::int AS prs_closed_unmerged_n
-     FROM issues`,
-    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1))],
+     FROM issues WHERE repo = $3`,
+    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), env.repo],
   );
   return row ?? { median_issue_close_days: null, issues_closed_n: 0, median_pr_merge_days: null, prs_merged_n: 0, prs_closed_unmerged_n: 0 };
 }
@@ -538,9 +648,9 @@ export async function openAgeBuckets(kind: "issue" | "pr"): Promise<{ bucket: st
         WHEN age < interval '30 days' THEN '${AGE_BUCKETS[1]}'
         WHEN age < interval '90 days' THEN '${AGE_BUCKETS[2]}'
         ELSE '${AGE_BUCKETS[3]}' END AS bucket, count(*)::int AS n
-     FROM (SELECT now() - created_at AS age FROM issues WHERE is_pr = $1 AND state = 'open') x
+     FROM (SELECT now() - created_at AS age FROM issues WHERE repo = $2 AND is_pr = $1 AND state = 'open') x
      GROUP BY 1`,
-    [kind === "pr"],
+    [kind === "pr", env.repo],
   );
   const byBucket = new Map(rows.map((r) => [r.bucket, r.n]));
   return AGE_BUCKETS.map((bucket) => ({ bucket, n: byBucket.get(bucket) ?? 0 }));
@@ -549,8 +659,8 @@ export async function openAgeBuckets(kind: "issue" | "pr"): Promise<{ bucket: st
 export function openIssueLabels(limit = 12): Promise<{ label: string; n: number }[]> {
   return query(
     `SELECT l AS label, count(*)::int AS n FROM issues, unnest(labels) AS l
-     WHERE NOT is_pr AND state = 'open' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $1`,
-    [limit],
+     WHERE repo = $2 AND NOT is_pr AND state = 'open' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $1`,
+    [limit, env.repo],
   );
 }
 
@@ -566,16 +676,16 @@ export interface IssueListRow {
 export function oldestOpenIssues(limit = 10): Promise<IssueListRow[]> {
   return query<IssueListRow>(
     `SELECT number, title, author, created_at, comments, labels FROM issues
-     WHERE NOT is_pr AND state = 'open' ORDER BY created_at ASC LIMIT $1`,
-    [limit],
+     WHERE repo = $2 AND NOT is_pr AND state = 'open' ORDER BY created_at ASC LIMIT $1`,
+    [limit, env.repo],
   );
 }
 
 export function mostDiscussedOpenIssues(limit = 10): Promise<IssueListRow[]> {
   return query<IssueListRow>(
     `SELECT number, title, author, created_at, comments, labels FROM issues
-     WHERE NOT is_pr AND state = 'open' ORDER BY comments DESC, created_at ASC LIMIT $1`,
-    [limit],
+     WHERE repo = $2 AND NOT is_pr AND state = 'open' ORDER BY comments DESC, created_at ASC LIMIT $1`,
+    [limit, env.repo],
   );
 }
 
@@ -586,9 +696,9 @@ export function mostDiscussedOpenIssues(limit = 10): Promise<IssueListRow[]> {
 export function topContributors(from: string, to: string, limit = 15): Promise<{ author_login: string; commits: number }[]> {
   return query(
     `SELECT author_login, count(*)::int AS commits FROM commits
-     WHERE author_login IS NOT NULL AND committed_at >= $1 AND committed_at < $2
+     WHERE repo = $4 AND author_login IS NOT NULL AND committed_at >= $1 AND committed_at < $2
      GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $3`,
-    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), limit],
+    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), limit, env.repo],
   );
 }
 
@@ -602,9 +712,9 @@ export interface ReleaseRow {
 export function releasesIn(from: string, to: string, limit = 60): Promise<ReleaseRow[]> {
   return query<ReleaseRow>(
     `SELECT tag, name, prerelease, published_at FROM releases
-     WHERE NOT draft AND published_at >= $1 AND published_at < $2
+     WHERE repo = $4 AND NOT draft AND published_at >= $1 AND published_at < $2
      ORDER BY published_at DESC LIMIT $3`,
-    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), limit],
+    [istMidnightUtc(from), istMidnightUtc(addDays(to, 1)), limit, env.repo],
   );
 }
 
@@ -657,13 +767,14 @@ export interface TableCounts {
 export async function tableCounts(): Promise<TableCounts> {
   const row = await queryOne<TableCounts>(
     `SELECT
-      (SELECT count(*) FROM stargazers WHERE unstarred_at IS NULL)::int AS stargazers,
-      (SELECT count(*) FROM forks)::int AS forks,
-      (SELECT count(*) FROM issues WHERE NOT is_pr)::int AS issues,
-      (SELECT count(*) FROM issues WHERE is_pr)::int AS prs,
-      (SELECT count(*) FROM commits)::int AS commits,
-      (SELECT count(*) FROM releases)::int AS releases,
+      (SELECT count(*) FROM stargazers WHERE repo = $1 AND unstarred_at IS NULL)::int AS stargazers,
+      (SELECT count(*) FROM forks WHERE repo = $1)::int AS forks,
+      (SELECT count(*) FROM issues WHERE repo = $1 AND NOT is_pr)::int AS issues,
+      (SELECT count(*) FROM issues WHERE repo = $1 AND is_pr)::int AS prs,
+      (SELECT count(*) FROM commits WHERE repo = $1)::int AS commits,
+      (SELECT count(*) FROM releases WHERE repo = $1)::int AS releases,
       (SELECT count(*) FROM snapshots)::int AS snapshots`,
+    [env.repo],
   );
   return row ?? { stargazers: 0, forks: 0, issues: 0, prs: 0, commits: 0, releases: 0, snapshots: 0 };
 }

@@ -28,7 +28,7 @@ Requires Node 20+ (installed via nvm) and a Neon database.
 cp .env.example .env.local   # fill in DATABASE_URL, GITHUB_TOKEN, DASHBOARD_PASSWORD, SESSION_SECRET, COLLECT_SECRET
 npm install
 npm run db:migrate           # applies db/schema.sql (idempotent)
-npm run backfill             # one-time history load; needs GITHUB_TOKEN (~5 min, a few hundred API calls)
+npm run backfill             # one-time history load of the primary repo; needs GITHUB_TOKEN (~5 min, a few hundred API calls)
 npm run collect              # take one snapshot + incremental sync
 npm run dev                  # http://localhost:3000
 ```
@@ -45,13 +45,17 @@ It reads the repository page once and loads the periods (UTC) into `external_gai
 
 ## Comparing other repositories
 
-The **Compare** page tracks any public repository next to Bifrost. Adding one (`owner/name` or a GitHub URL) takes its first reading immediately; after that every collector run reads it too, right after Bifrost, in one GraphQL request plus two REST count requests per repository. Compared repositories get headline counts only (no event tables), so:
+The **Compare** page tracks any public repository next to Bifrost. Adding one (`owner/name` or a GitHub URL) takes its first reading immediately; after that every collector run reads it too, right after Bifrost, in one GraphQL request plus two REST count requests per repository.
 
-- their daily activity is the change between consecutive day-close readings (stars, forks, issues opened/closed, PRs opened/merged, commits, contributors, releases), and it starts the day after they were added;
-- their star and fork totals for the days before the first reading are counted back through the outside source's daily gains, when those have been imported (see above);
-- there are no 6-hour windows, issue lists or contributor tables for them.
+Compared repositories get the same event history as Bifrost: the first cron run after one is added walks all of its issues, pull requests, commits, forks and releases (one repository per run, since a large one takes a few minutes and a few hundred to a thousand requests), and every later run syncs the new events. From then on its daily forks, issues, PRs, commits, contributors and releases are exact back to the repository's creation, reconstructed from event timestamps exactly as for Bifrost. Until that first walk has happened, its daily activity is the change between consecutive day-close readings, with the outside source (above) filling in earlier days. To load one right away instead of waiting for the schedule:
 
-Removing a repository only hides it (`tracked_repos.removed_at`); its readings stay, and adding it again brings the history back. The page needs `GITHUB_TOKEN` (GraphQL).
+```bash
+npm run backfill -- owner/name
+```
+
+Stars are the exception for every repository, Bifrost included: GitHub hides the stargazer list, so daily star gains come from our readings from the day a repository was added, from the outside source before that (about 60 days), and only per month further back (about two years). The compare views draw the last two years.
+
+The event tables carry a `repo` column; rows without one belong to Bifrost. The dashboard's own pages only ever read Bifrost's rows. Removing a repository only hides it (`tracked_repos.removed_at`, after typing its name to confirm); its readings and events stay, and adding it again brings the history back. The page needs `GITHUB_TOKEN` (GraphQL).
 
 ## Railway deployment
 
@@ -80,7 +84,7 @@ To reproduce from scratch:
 ```
 db/schema.sql            tables + indexes (also applied by npm run db:migrate)
 scripts/                 migrate.ts, import-history.ts (outside-source history for any repo)
-src/collector/           snapshot.ts (headline counts), repos.ts (compared repos), sync.ts (event tables), jobs.ts (run bookkeeping), run.ts (CLI)
+src/collector/           snapshot.ts (headline counts), repos.ts (compared repos: readings + event backfill), sync.ts (event tables, per repo), jobs.ts (run bookkeeping), run.ts (CLI)
 src/lib/github.ts        REST/GraphQL client with pagination, rate-limit backoff
 src/lib/queries.ts       all dashboard SQL, IST bucketing, snapshot/reconstruction merge
 src/lib/compare.ts       compared repositories: tracked_repos, repo_snapshots, the shared per-day shape

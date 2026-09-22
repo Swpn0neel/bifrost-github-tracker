@@ -4,7 +4,7 @@
 // GraphQL caps at 1,000).
 import { GitHubClient, GitHubError } from "../lib/github";
 import { query, queryOne } from "../lib/db";
-import type { Log } from "./sync";
+import { getState, runSync, setState, type Log } from "./sync";
 import { istDate, istSlot } from "../lib/time";
 
 export interface RepoFacts {
@@ -16,6 +16,7 @@ export interface RepoFacts {
   language: string | null;
   created_at: string | null;
   is_archived: boolean;
+  default_branch: string | null;
 }
 
 export interface RepoCounts {
@@ -112,6 +113,7 @@ export async function fetchRepo(gh: GitHubClient, log: Log): Promise<{ facts: Re
       language: r.primaryLanguage?.name ?? null,
       created_at: r.createdAt,
       is_archived: r.isArchived,
+      default_branch: r.defaultBranchRef?.name ?? null,
     },
     counts: {
       stars: r.stargazerCount,
@@ -172,8 +174,14 @@ export async function storeRepoSnapshot(repoId: number, facts: RepoFacts, counts
   return { id: row.id, captured_at };
 }
 
+export interface SnapshottedRepo {
+  id: number;
+  full_name: string;
+  default_branch: string | null;
+}
+
 export interface TrackedRepoSnapshotResult {
-  snapshotted: string[];
+  snapshotted: SnapshottedRepo[];
   errors: string[];
 }
 
@@ -192,7 +200,7 @@ export async function snapshotTrackedRepos(gh: GitHubClient, log: Log, triggered
       const client = gh.forRepo(repo.full_name);
       const { facts, counts } = await fetchRepo(client, log);
       const snap = await storeRepoSnapshot(repo.id, facts, counts, triggeredBy);
-      result.snapshotted.push(facts.full_name);
+      result.snapshotted.push({ id: repo.id, full_name: facts.full_name, default_branch: facts.default_branch });
       log(`compare ${facts.full_name}: snapshot #${snap.id}, ${counts.stars} stars, ${counts.forks} forks, ${counts.open_issues} open issues, ${counts.open_prs} open PRs`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -200,6 +208,48 @@ export async function snapshotTrackedRepos(gh: GitHubClient, log: Log, triggered
       log(`compare ${repo.full_name} FAILED: ${message}`);
     }
   }
+  return result;
+}
+
+export const backfilledKey = (repo: string) => `events_backfilled_at:${repo}`;
+
+export interface TrackedRepoSyncResult {
+  synced: string[];
+  /** The repo whose full history was loaded in this run, if any. */
+  backfilled: string | null;
+  /** Repos still waiting for their full load (one per cron run, and never in a manual run). */
+  waiting: string[];
+  errors: string[];
+}
+
+/**
+ * Event history for the compared repos: an incremental sync for each one already loaded,
+ * and one full load per cron run for a repo that is not yet (a full walk of a large repo
+ * takes minutes, so manual refreshes leave it to the schedule).
+ */
+export async function syncTrackedRepos(gh: GitHubClient, log: Log, repos: SnapshottedRepo[], { allowBackfill }: { allowBackfill: boolean }): Promise<TrackedRepoSyncResult> {
+  const result: TrackedRepoSyncResult = { synced: [], backfilled: null, waiting: [], errors: [] };
+  for (const repo of repos) {
+    if (!repo.default_branch) {
+      result.errors.push(`${repo.full_name}: no default branch (empty repository?)`);
+      continue;
+    }
+    const covered = (await getState(backfilledKey(repo.full_name))) !== null;
+    if (!covered && (!allowBackfill || result.backfilled)) {
+      result.waiting.push(repo.full_name);
+      continue;
+    }
+    const client = gh.forRepo(repo.full_name);
+    log(`compare ${repo.full_name}: ${covered ? "incremental event sync" : "full event backfill"}`);
+    const sync = await runSync(client, log, { repo: { default_branch: repo.default_branch }, full: !covered, fullStars: false });
+    for (const e of sync.errors) result.errors.push(`${repo.full_name} ${e}`);
+    if (covered) result.synced.push(repo.full_name);
+    else if (sync.errors.length === 0) {
+      await setState(backfilledKey(repo.full_name), new Date().toISOString());
+      result.backfilled = repo.full_name;
+    }
+  }
+  if (result.waiting.length) log(`compare: ${result.waiting.join(", ")} still waiting for a full event backfill (next cron run)`);
   return result;
 }
 

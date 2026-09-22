@@ -1,7 +1,7 @@
 // CLI entry point used by the Railway cron service and for local runs:
 //   npm run collect   -> snapshot + incremental sync (the 4x/day job)
 //   npm run sync      -> incremental sync only
-//   npm run backfill  -> full history walk (needs GITHUB_TOKEN)
+//   npm run backfill [owner/name] -> full history walk of the primary repo, or of a compared one (needs GITHUB_TOKEN)
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
       : kind === "sync"
         ? await jobs.runSyncJob("manual")
         : kind === "backfill"
-          ? await jobs.runBackfillJob("manual")
+          ? await jobs.runBackfillJob("manual", process.argv[3])
           : null;
   if (!result) {
     console.error(`Unknown job "${kind}". Use snapshot | sync | backfill.`);

@@ -1,9 +1,9 @@
 import { GitHubClient } from "../lib/github";
 import { env } from "../lib/env";
 import { query, queryOne } from "../lib/db";
-import { snapshotTrackedRepos } from "./repos";
+import { backfilledKey, snapshotTrackedRepos, syncTrackedRepos } from "./repos";
 import { takeSnapshot } from "./snapshot";
-import { getState, runSync, type Log } from "./sync";
+import { getState, runSync, setState, type Log } from "./sync";
 
 export type Trigger = "cron" | "manual";
 export type JobStatus = "ok" | "partial" | "error";
@@ -117,23 +117,29 @@ export function runSnapshotJob(triggeredBy: Trigger): Promise<JobResult> {
     const neverFullySynced = !(await getState("stars_full_synced_at"));
     const fullStars = (snap.slot === 0 && triggeredBy === "cron") || neverFullySynced;
     const sync = await runSync(gh, log, { repo: snap.repo, full: false, fullStars });
+    // Compared repos' events come after the primary's, so a long backfill never delays Bifrost's own numbers.
+    const compareSync = await syncTrackedRepos(gh, log, compare.snapshotted, { allowBackfill: triggeredBy === "cron" });
+    const compareDetail = { ...compare, events: compareSync, errors: [...compare.errors, ...compareSync.errors] };
     return {
-      status: sync.errors.length || compare.errors.length ? "partial" : "ok",
-      detail: { snapshot: snapshotDetail, compare, sync: sync.counts, syncErrors: sync.errors, rateRemaining: gh.rateRemaining },
+      status: sync.errors.length || compareDetail.errors.length ? "partial" : "ok",
+      detail: { snapshot: snapshotDetail, compare: compareDetail, sync: sync.counts, syncErrors: sync.errors, rateRemaining: gh.rateRemaining },
     };
   });
 }
 
-/** One-time (or repair) walk of every event endpoint. Needs a token. */
-export function runBackfillJob(triggeredBy: Trigger = "manual"): Promise<JobResult> {
-  return withRun("backfill", triggeredBy, async ({ gh, log }) => {
-    if (!gh.hasToken) throw new Error("Backfill requires GITHUB_TOKEN: stargazer timestamps need an authenticated request.");
+/** One-time (or repair) walk of every event endpoint, for the primary repo or a compared one. Needs a token. */
+export function runBackfillJob(triggeredBy: Trigger = "manual", repoName?: string): Promise<JobResult> {
+  return withRun("backfill", triggeredBy, async ({ gh: primary, log }) => {
+    if (!primary.hasToken) throw new Error("Backfill requires GITHUB_TOKEN: stargazer timestamps need an authenticated request.");
+    const compared = repoName !== undefined && repoName.toLowerCase() !== env.repo.toLowerCase();
+    const gh = compared ? primary.forRepo(repoName) : primary;
     const repo = await gh.repoInfo();
-    log(`backfilling ${gh.owner}/${gh.name}: ${repo.stargazers_count} stars, ${repo.forks_count} forks, default branch ${repo.default_branch}`);
-    const sync = await runSync(gh, log, { repo, full: true, fullStars: true });
+    log(`backfilling ${gh.fullName}: ${repo.stargazers_count} stars, ${repo.forks_count} forks, default branch ${repo.default_branch}`);
+    const sync = await runSync(gh, log, { repo, full: true, fullStars: !compared });
+    if (compared && sync.errors.length === 0) await setState(backfilledKey(gh.fullName), new Date().toISOString());
     return {
       status: sync.errors.length ? "partial" : "ok",
-      detail: { sync: sync.counts, syncErrors: sync.errors, rateRemaining: gh.rateRemaining },
+      detail: { repo: gh.fullName, sync: sync.counts, syncErrors: sync.errors, rateRemaining: gh.rateRemaining },
     };
   });
 }

@@ -29,13 +29,20 @@ CREATE INDEX IF NOT EXISTS snapshots_captured_idx  ON snapshots (captured_at);
 
 -- Event tables, filled by backfill + incremental sync. These let us reconstruct
 -- history before the tracker existed and bucket activity into 6-hour slots.
+-- Every row names its repository (owner/name): the primary repo and the ones on
+-- the Compare page share these tables. The default is the primary repo, so rows
+-- written before the column existed, and by older code, land there.
 CREATE TABLE IF NOT EXISTS stargazers (
-  login        text PRIMARY KEY,
+  repo         text NOT NULL DEFAULT 'maximhq/bifrost',
+  login        text NOT NULL,
   starred_at   timestamptz NOT NULL,
-  unstarred_at timestamptz                                  -- set when a full sync no longer sees the login
+  unstarred_at timestamptz,                                 -- set when a full sync no longer sees the login
+  PRIMARY KEY (repo, login)
 );
 ALTER TABLE stargazers ADD COLUMN IF NOT EXISTS unstarred_at timestamptz;
+ALTER TABLE stargazers ADD COLUMN IF NOT EXISTS repo text NOT NULL DEFAULT 'maximhq/bifrost';
 CREATE INDEX IF NOT EXISTS stargazers_starred_idx ON stargazers (starred_at);
+CREATE INDEX IF NOT EXISTS stargazers_repo_starred_idx ON stargazers (repo, starred_at);
 
 -- Star gains per period from an outside source, for history the tracker cannot
 -- measure itself (the stargazer list is closed to our token). Periods are UTC
@@ -50,15 +57,19 @@ CREATE TABLE IF NOT EXISTS external_star_gains (
 );
 
 CREATE TABLE IF NOT EXISTS forks (
-  fork_id    bigint PRIMARY KEY,
+  repo       text NOT NULL DEFAULT 'maximhq/bifrost',
+  fork_id    bigint PRIMARY KEY,                            -- GitHub ids are global, so the id alone is the key
   owner      text,
   created_at timestamptz NOT NULL
 );
+ALTER TABLE forks ADD COLUMN IF NOT EXISTS repo text NOT NULL DEFAULT 'maximhq/bifrost';
 CREATE INDEX IF NOT EXISTS forks_created_idx ON forks (created_at);
+CREATE INDEX IF NOT EXISTS forks_repo_created_idx ON forks (repo, created_at);
 
 -- Issues and pull requests share GitHub's issue numbering.
 CREATE TABLE IF NOT EXISTS issues (
-  number     integer PRIMARY KEY,
+  repo       text NOT NULL DEFAULT 'maximhq/bifrost',
+  number     integer NOT NULL,
   is_pr      boolean NOT NULL,
   title      text,
   author     text,
@@ -68,31 +79,59 @@ CREATE TABLE IF NOT EXISTS issues (
   merged_at  timestamptz,
   labels     text[] NOT NULL DEFAULT '{}',
   comments   integer NOT NULL DEFAULT 0,
-  updated_at timestamptz NOT NULL
+  updated_at timestamptz NOT NULL,
+  PRIMARY KEY (repo, number)
 );
+ALTER TABLE issues ADD COLUMN IF NOT EXISTS repo text NOT NULL DEFAULT 'maximhq/bifrost';
 CREATE INDEX IF NOT EXISTS issues_created_idx ON issues (is_pr, created_at);
 CREATE INDEX IF NOT EXISTS issues_closed_idx  ON issues (is_pr, closed_at);
 CREATE INDEX IF NOT EXISTS issues_updated_idx ON issues (updated_at);
+CREATE INDEX IF NOT EXISTS issues_repo_created_idx ON issues (repo, is_pr, created_at);
+CREATE INDEX IF NOT EXISTS issues_repo_closed_idx  ON issues (repo, is_pr, closed_at);
+CREATE INDEX IF NOT EXISTS issues_repo_updated_idx ON issues (repo, updated_at);
 
 CREATE TABLE IF NOT EXISTS commits (
-  sha          text PRIMARY KEY,
+  repo         text NOT NULL DEFAULT 'maximhq/bifrost',
+  sha          text NOT NULL,
   author_login text,
   author_name  text,
   committed_at timestamptz NOT NULL,
-  message      text
+  message      text,
+  PRIMARY KEY (repo, sha)
 );
+ALTER TABLE commits ADD COLUMN IF NOT EXISTS repo text NOT NULL DEFAULT 'maximhq/bifrost';
 CREATE INDEX IF NOT EXISTS commits_committed_idx ON commits (committed_at);
 CREATE INDEX IF NOT EXISTS commits_author_idx    ON commits (author_login, committed_at);
+CREATE INDEX IF NOT EXISTS commits_repo_committed_idx ON commits (repo, committed_at);
+CREATE INDEX IF NOT EXISTS commits_repo_author_idx    ON commits (repo, author_login, committed_at);
 
 CREATE TABLE IF NOT EXISTS releases (
-  release_id   bigint PRIMARY KEY,
+  repo         text NOT NULL DEFAULT 'maximhq/bifrost',
+  release_id   bigint PRIMARY KEY,                          -- GitHub ids are global
   tag          text NOT NULL,
   name         text,
   prerelease   boolean NOT NULL DEFAULT false,
   draft        boolean NOT NULL DEFAULT false,
   published_at timestamptz
 );
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS repo text NOT NULL DEFAULT 'maximhq/bifrost';
 CREATE INDEX IF NOT EXISTS releases_published_idx ON releases (published_at);
+CREATE INDEX IF NOT EXISTS releases_repo_published_idx ON releases (repo, published_at);
+
+-- Databases from before the repo column: widen the keys that GitHub only makes
+-- unique within one repository.
+DO $$
+BEGIN
+  IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'stargazers_pkey') = 'PRIMARY KEY (login)' THEN
+    ALTER TABLE stargazers DROP CONSTRAINT stargazers_pkey, ADD PRIMARY KEY (repo, login);
+  END IF;
+  IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'issues_pkey') = 'PRIMARY KEY (number)' THEN
+    ALTER TABLE issues DROP CONSTRAINT issues_pkey, ADD PRIMARY KEY (repo, number);
+  END IF;
+  IF (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'commits_pkey') = 'PRIMARY KEY (sha)' THEN
+    ALTER TABLE commits DROP CONSTRAINT commits_pkey, ADD PRIMARY KEY (repo, sha);
+  END IF;
+END $$;
 
 -- Audit log of collector executions.
 CREATE TABLE IF NOT EXISTS collector_runs (
@@ -136,7 +175,8 @@ CREATE TABLE IF NOT EXISTS tracked_repos (
 CREATE UNIQUE INDEX IF NOT EXISTS tracked_repos_name_idx ON tracked_repos (lower(full_name));
 
 -- Headline counts of a tracked repo, one row per collector run, in the same
--- 6-hour slots as `snapshots`. No event tables for these repos: their daily
+-- 6-hour slots as `snapshots`. Their events go into the shared event tables
+-- above once the collector has backfilled them; until then their daily
 -- activity is the change between consecutive day-close readings.
 CREATE TABLE IF NOT EXISTS repo_snapshots (
   id            bigserial PRIMARY KEY,

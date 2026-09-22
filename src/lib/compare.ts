@@ -1,12 +1,32 @@
 // Data for the Compare page: the repositories tracked alongside the primary one,
 // their headline readings, and a per-day series in one shape for every repo,
-// the primary included. Compared repos have snapshots and an outside source
-// only, so their daily activity is the change between day-close readings.
+// the primary included. A compared repo whose events have been backfilled gets
+// the same event-based series as the primary; before that, its daily activity
+// is the change between day-close readings, with the outside source filling in.
 import { query, queryOne } from "./db";
 import { env } from "./env";
-import { dailySeries, dataStartDate, externalMonthlyStars, firstSnapshot, latestSnapshot, type SnapshotRow } from "./queries";
-import { addDays, type Slot } from "./time";
+import {
+  dailySeries,
+  dataStartDate,
+  eventsCovered,
+  eventsStartDate,
+  externalMonthlyStars,
+  firstRepoSnapshot,
+  firstSnapshot,
+  latestRepoSnapshot,
+  latestSnapshot,
+  repoDayCloseSnapshots,
+  type CountsRow,
+  type DailyPoint,
+  type RepoSnapshotRow,
+} from "./queries";
+import { addDays } from "./time";
 import type { MonthlyFill, TrendRow } from "./trends";
+
+export { repoSnapshotCount } from "./queries";
+
+/** The compare views cover this many days at most: enough for two years of monthly bars without shipping a decade of day rows. */
+export const COMPARE_WINDOW_DAYS = 730;
 
 // ---------------------------------------------------------------------------
 // Tracked repositories
@@ -55,68 +75,6 @@ export async function upsertTrackedRepo(fullName: string): Promise<{ repo: Track
 
 export async function removeTrackedRepo(id: number): Promise<TrackedRepo | null> {
   return queryOne<TrackedRepo>(`UPDATE tracked_repos SET removed_at = now() WHERE id = $1 AND removed_at IS NULL RETURNING ${REPO_COLS}`, [id]);
-}
-
-// ---------------------------------------------------------------------------
-// Snapshots of tracked repos
-// ---------------------------------------------------------------------------
-
-export interface RepoSnapshotRow {
-  id: number;
-  repo_id: number;
-  captured_at: Date;
-  ist_date: string;
-  slot: Slot;
-  triggered_by: string;
-  stars: number;
-  forks: number;
-  watchers: number;
-  open_issues: number;
-  closed_issues: number;
-  open_prs: number;
-  merged_prs: number;
-  closed_prs: number;
-  contributors: number | null;
-  commits: number | null;
-  releases: number | null;
-  discussions: number | null;
-}
-
-const SNAP_COLS = `s.id, s.repo_id, s.captured_at, s.ist_date::text AS ist_date, s.slot, s.triggered_by,
-  s.stars, s.forks, s.watchers, s.open_issues, s.closed_issues, s.open_prs, s.merged_prs, s.closed_prs,
-  s.contributors, s.commits, s.releases, s.discussions`;
-
-// Same rule as the primary repo's snapshots: only a cron reading taken in the
-// first hour of its window defines a day; refreshes only update the live numbers.
-const SCHEDULED = `(s.triggered_by = 'cron'
-  AND s.captured_at < timezone('Asia/Kolkata', s.ist_date::timestamp) + make_interval(hours => s.slot) + interval '60 minutes')`;
-
-export function latestRepoSnapshot(repoId: number): Promise<RepoSnapshotRow | null> {
-  return queryOne<RepoSnapshotRow>(`SELECT ${SNAP_COLS} FROM repo_snapshots s WHERE s.repo_id = $1 ORDER BY s.captured_at DESC LIMIT 1`, [repoId]);
-}
-
-export function firstRepoSnapshot(repoId: number): Promise<RepoSnapshotRow | null> {
-  return queryOne<RepoSnapshotRow>(`SELECT ${SNAP_COLS} FROM repo_snapshots s WHERE s.repo_id = $1 ORDER BY s.captured_at ASC LIMIT 1`, [repoId]);
-}
-
-/** The close-of-day reading per day (see dayCloseSnapshots in queries.ts). */
-export function repoDayCloseSnapshots(repoId: number, from: string, to: string): Promise<(RepoSnapshotRow & { date: string })[]> {
-  return query<RepoSnapshotRow & { date: string }>(
-    `WITH days AS (SELECT generate_series($2::date, $3::date, interval '1 day')::date AS d)
-     SELECT DISTINCT ON (days.d) days.d::text AS date, ${SNAP_COLS}
-     FROM days
-     JOIN repo_snapshots s
-       ON s.repo_id = $1 AND (
-         (${SCHEDULED} AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0)))
-         OR (NOT ${SCHEDULED} AND s.ist_date = days.d))
-     ORDER BY days.d, ${SCHEDULED} DESC, s.ist_date DESC, s.slot DESC, s.captured_at DESC`,
-    [repoId, from, to],
-  );
-}
-
-export async function repoSnapshotCount(): Promise<number> {
-  const row = await queryOne<{ n: number }>("SELECT count(*)::int AS n FROM repo_snapshots");
-  return row?.n ?? 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,17 +189,21 @@ async function estimatedTotals(repo: TrackedRepo): Promise<Map<string, { stars: 
 
 /** Earliest IST date a compared repo has anything for, or null when it has nothing yet. */
 export async function repoDataStart(repo: TrackedRepo): Promise<string | null> {
-  const [first, outside] = await Promise.all([firstRepoSnapshot(repo.id), externalDataStart(repo.full_name)]);
-  const candidates = [first?.ist_date, outside].filter((d): d is string => Boolean(d));
+  const [first, outside, covered] = await Promise.all([firstRepoSnapshot(repo.id), externalDataStart(repo.full_name), eventsCovered(repo.full_name)]);
+  const events = covered ? await eventsStartDate(repo.full_name) : null;
+  const candidates = [first?.ist_date, outside, events].filter((d): d is string => Boolean(d));
   return candidates.length ? candidates.sort()[0] : null;
 }
 
 /**
- * One row per IST day for a compared repo. A day with a close-of-day reading
- * carries its totals, and its activity when the day before has one too; other
- * days take the outside source's activity and counted-back totals, as estimates.
+ * One row per IST day for a compared repo. Once its events are loaded this is the
+ * same event-based series the primary repo has. Until then a day with a
+ * close-of-day reading carries its totals, and its activity when the day before
+ * has one too; other days take the outside source's activity and counted-back
+ * totals, as estimates.
  */
 export async function repoDailySeries(repo: TrackedRepo, from: string, to: string): Promise<RepoDay[]> {
+  if (await eventsCovered(repo.full_name)) return (await dailySeries(from, to, repo.full_name)).map(fromDailyPoint);
   const [closes, outside, estimated] = await Promise.all([
     repoDayCloseSnapshots(repo.id, addDays(from, -1), to),
     externalDaily(repo.full_name, from, to),
@@ -299,10 +261,9 @@ export async function repoDailySeries(repo: TrackedRepo, from: string, to: strin
   return days;
 }
 
-/** The primary repo in the same shape, from its richer event-based series. */
-export async function primaryDailySeries(from: string, to: string): Promise<RepoDay[]> {
-  const points = await dailySeries(from, to);
-  return points.map((p) => ({
+/** An event-based day (the primary repo's, or a backfilled compared repo's) in the shared shape. */
+function fromDailyPoint(p: DailyPoint): RepoDay {
+  return {
     date: p.date,
     source: p.source === "snapshot" ? "snapshot" : "estimate",
     stars_estimated: p.stars_estimated,
@@ -323,7 +284,12 @@ export async function primaryDailySeries(from: string, to: string): Promise<Repo
     commits: p.commits,
     new_contributors: p.new_contributors,
     releases_published: p.releases_published,
-  }));
+  };
+}
+
+/** The primary repo in the shared shape, from its event-based series. */
+export async function primaryDailySeries(from: string, to: string): Promise<RepoDay[]> {
+  return (await dailySeries(from, to)).map(fromDailyPoint);
 }
 
 /** The activity columns of a daily series, for the trend charts. */
@@ -367,7 +333,7 @@ export interface ComparedRepo {
   monthly: MonthlyFill;
 }
 
-function liveFromSnapshot(s: SnapshotRow | RepoSnapshotRow): LiveCounts {
+function liveFromSnapshot(s: CountsRow): LiveCounts {
   return {
     captured_at: s.captured_at,
     stars: s.stars,
@@ -381,9 +347,16 @@ function liveFromSnapshot(s: SnapshotRow | RepoSnapshotRow): LiveCounts {
   };
 }
 
+/** The first day of the window the compare views draw: the data start, but no more than COMPARE_WINDOW_DAYS back. */
+function windowStart(dataStart: string, to: string): string {
+  const floor = addDays(to, -(COMPARE_WINDOW_DAYS - 1));
+  const from = dataStart > floor ? dataStart : floor;
+  return from < to ? from : to;
+}
+
 export async function comparedPrimary(to: string): Promise<ComparedRepo> {
   const [dataStart, latest, first] = await Promise.all([dataStartDate(), latestSnapshot(), firstSnapshot()]);
-  const from = dataStart < to ? dataStart : to;
+  const from = windowStart(dataStart, to);
   const [days, monthlyStars] = await Promise.all([primaryDailySeries(from, to), externalMonthlyStars()]);
   return {
     key: "primary",
@@ -404,7 +377,7 @@ export async function comparedPrimary(to: string): Promise<ComparedRepo> {
 
 export async function comparedRepo(repo: TrackedRepo, to: string): Promise<ComparedRepo> {
   const [dataStart, latest, first, monthly] = await Promise.all([repoDataStart(repo), latestRepoSnapshot(repo.id), firstRepoSnapshot(repo.id), externalMonthly(repo.full_name)]);
-  const from = dataStart && dataStart < to ? dataStart : to;
+  const from = dataStart ? windowStart(dataStart, to) : to;
   const days = dataStart ? await repoDailySeries(repo, from, to) : [];
   return {
     key: `repo-${repo.id}`,
