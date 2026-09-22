@@ -7,6 +7,7 @@ Internal dashboard that snapshots `maximhq/bifrost` on GitHub four times a day (
 - **Quarters** – the four daily windows: stacked per day, weekday × window heatmap, net change between snapshots.
 - **Issues & PRs** – opened vs closed, backlog, median time to close/merge, merge rate, age buckets, labels, oldest and most-discussed.
 - **Activity** – commits, new contributors, releases, top contributors.
+- **Compare** – other repositories (competitors) read at the same four times a day, side by side with Bifrost: a leaderboard with today / 7 d / 30 d star gains, daily and monthly comparison charts with a metric switch and one line per repository, and a page per repository. Add or remove repositories on the page itself.
 - **Status** – collector runs, next scheduled run, table counts, sync cursors.
 
 ## How the numbers are defined
@@ -34,7 +35,23 @@ npm run dev                  # http://localhost:3000
 
 The GitHub token only needs public read access (a fine-grained token with "Public repositories (read-only)" is ideal). Without it the collector still snapshots the headline numbers, but the backfill and event sync are skipped (the anonymous limit is 60 requests/hour). If GitHub rejects the token, the collector logs it and continues anonymously rather than failing.
 
-**Star history before the first snapshot.** GitHub does not expose the stargazer list to a read-only token, so the tracker only measures star gains from its own snapshots. Earlier history can be filled in once from an outside source: `npm run import:stars -- capture.json` loads per-day and per-month star gains (UTC periods) into `external_star_gains`. Snapshots always take precedence, imported values are labelled as estimates in the UI, and the dashboard works the same without them.
+**History before the first snapshot.** GitHub does not expose the stargazer list to a read-only token, so the tracker only measures star gains from its own snapshots. Earlier history can be filled in once from an outside source. [Trendshift](https://trendshift.io) publishes per-day (last ~60 days) and per-month (last ~24 months) stars, forks, merged PRs and issues opened/closed for the repositories it tracks; find the repository there, take the id from its URL and run
+
+```bash
+npm run import:history -- --trendshift <id> --repo owner/name
+```
+
+It reads the repository page once and loads the periods (UTC) into `external_gains`, where our own readings always take precedence and imported values are labelled as estimates. Run it again the day after adding a repository so that day is covered too (the source only reports a day once it has ended). `--dry-run` shows what would be written, `--save file.json` keeps the capture, and a saved capture can be imported later with `npm run import:history -- file.json`.
+
+## Comparing other repositories
+
+The **Compare** page tracks any public repository next to Bifrost. Adding one (`owner/name` or a GitHub URL) takes its first reading immediately; after that every collector run reads it too, right after Bifrost, in one GraphQL request plus two REST count requests per repository. Compared repositories get headline counts only (no event tables), so:
+
+- their daily activity is the change between consecutive day-close readings (stars, forks, issues opened/closed, PRs opened/merged, commits, contributors, releases), and it starts the day after they were added;
+- their star and fork totals for the days before the first reading are counted back through the outside source's daily gains, when those have been imported (see above);
+- there are no 6-hour windows, issue lists or contributor tables for them.
+
+Removing a repository only hides it (`tracked_repos.removed_at`); its readings stay, and adding it again brings the history back. The page needs `GITHUB_TOKEN` (GraphQL).
 
 ## Railway deployment
 
@@ -62,11 +79,13 @@ To reproduce from scratch:
 
 ```
 db/schema.sql            tables + indexes (also applied by npm run db:migrate)
-src/collector/           snapshot.ts (headline counts), sync.ts (event tables), jobs.ts (run bookkeeping), run.ts (CLI)
+scripts/                 migrate.ts, import-history.ts (outside-source history for any repo)
+src/collector/           snapshot.ts (headline counts), repos.ts (compared repos), sync.ts (event tables), jobs.ts (run bookkeeping), run.ts (CLI)
 src/lib/github.ts        REST/GraphQL client with pagination, rate-limit backoff
 src/lib/queries.ts       all dashboard SQL, IST bucketing, snapshot/reconstruction merge
+src/lib/compare.ts       compared repositories: tracked_repos, repo_snapshots, the shared per-day shape
 src/lib/time.ts          IST helpers and the four windows
-src/app/(dashboard)/     pages; src/app/api/ login, logout, collect, health
+src/app/(dashboard)/     pages (compare/ holds the comparison and the per-repository page); src/app/api/ login, logout, refresh, repos, health
 src/components/          charts (Recharts), tiles, tables, filters; layout/ is the sidebar shell
 src/components/ui/       shadcn/ui primitives (add more with npx shadcn@latest add <name>)
 src/proxy.ts             password gate (signed cookie)

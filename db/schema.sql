@@ -114,3 +114,77 @@ CREATE TABLE IF NOT EXISTS sync_state (
   value      text NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Compare page: other repositories tracked alongside the primary one
+-- ---------------------------------------------------------------------------
+
+-- A repository added on the Compare page. Removing it only sets removed_at, so
+-- its readings survive and re-adding it brings the history straight back.
+CREATE TABLE IF NOT EXISTS tracked_repos (
+  id              serial PRIMARY KEY,
+  full_name       text NOT NULL,                             -- owner/name as GitHub spells it
+  github_id       bigint,
+  description     text,
+  homepage        text,
+  language        text,
+  repo_created_at timestamptz,
+  trendshift_id   integer,
+  added_at        timestamptz NOT NULL DEFAULT now(),
+  removed_at      timestamptz
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tracked_repos_name_idx ON tracked_repos (lower(full_name));
+
+-- Headline counts of a tracked repo, one row per collector run, in the same
+-- 6-hour slots as `snapshots`. No event tables for these repos: their daily
+-- activity is the change between consecutive day-close readings.
+CREATE TABLE IF NOT EXISTS repo_snapshots (
+  id            bigserial PRIMARY KEY,
+  repo_id       integer     NOT NULL REFERENCES tracked_repos (id) ON DELETE CASCADE,
+  captured_at   timestamptz NOT NULL,
+  ist_date      date        NOT NULL,
+  slot          smallint    NOT NULL CHECK (slot IN (0,6,12,18)),
+  triggered_by  text        NOT NULL DEFAULT 'cron',
+  stars         integer NOT NULL,
+  forks         integer NOT NULL,
+  watchers      integer NOT NULL,
+  open_issues   integer NOT NULL,
+  closed_issues integer NOT NULL,
+  open_prs      integer NOT NULL,
+  merged_prs    integer NOT NULL,
+  closed_prs    integer NOT NULL,                             -- closed without merge
+  contributors  integer,
+  commits       integer,                                      -- on default branch
+  releases      integer,
+  discussions   integer,
+  size_kb       integer
+);
+CREATE INDEX IF NOT EXISTS repo_snapshots_repo_idx ON repo_snapshots (repo_id, ist_date, slot, captured_at);
+
+-- Activity per period from an outside source (Trendshift), for history before a
+-- repo's first snapshot. Periods are UTC days or months. A null metric means the
+-- source did not report it. Our own readings always take precedence.
+-- Replaces external_star_gains, which held stars for the primary repo only; that
+-- table is left in place until the code that read it is no longer deployed.
+CREATE TABLE IF NOT EXISTS external_gains (
+  repo          text NOT NULL,                                -- owner/name
+  source        text NOT NULL,                                -- e.g. 'trendshift'
+  granularity   text NOT NULL CHECK (granularity IN ('day','month')),
+  period_start  date NOT NULL,                                -- UTC; first day of the month for 'month'
+  stars         integer CHECK (stars >= 0),
+  forks         integer CHECK (forks >= 0),
+  issues_opened integer CHECK (issues_opened >= 0),
+  issues_closed integer CHECK (issues_closed >= 0),
+  prs_merged    integer CHECK (prs_merged >= 0),
+  captured_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (repo, source, granularity, period_start)
+);
+-- Carry the primary repo's star history over from the table this replaces.
+DO $$
+BEGIN
+  IF to_regclass('external_star_gains') IS NOT NULL THEN
+    INSERT INTO external_gains (repo, source, granularity, period_start, stars, captured_at)
+    SELECT 'maximhq/bifrost', source, granularity, period_start, stars, captured_at FROM external_star_gains
+    ON CONFLICT (repo, source, granularity, period_start) DO NOTHING;
+  END IF;
+END $$;

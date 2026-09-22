@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ArrowRight } from "lucide-react";
 import { Card } from "@/components/Card";
 import { TimeSeriesChart, type ChartSeries } from "@/components/TimeSeriesChart";
-import { Input } from "@/components/ui/input";
 import { formatInt } from "@/lib/format";
-import { addDays, daysBetween, formatDate, formatMonth, formatShortDate, isIsoDate } from "@/lib/time";
-import { periodEnd, trendWindow, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
+import { formatDate, formatMonth, formatShortDate } from "@/lib/time";
+import { periodEnd, trendDataStart, trendWindow, type MonthlyFill, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
 import { cn } from "@/lib/utils";
+import { RangeControls, useTrendRange, type PresetKey } from "./TrendControls";
 
 // Colour follows the metric, so hiding a line never repaints the ones that stay.
 const METRICS: { key: TrendMetric; label: string; color: string; defaultOn: boolean }[] = [
@@ -21,55 +20,13 @@ const METRICS: { key: TrendMetric; label: string; color: string; defaultOn: bool
   { key: "commits", label: "Commits", color: "var(--series-7)", defaultOn: false },
 ];
 
-// `days` is an inclusive day count ending today; "all" and "custom" have none.
-const PRESETS = [
-  { key: "7d", label: "7D", days: 7 },
-  { key: "30d", label: "30D", days: 30 },
-  { key: "60d", label: "60D", days: 60 },
-  { key: "90d", label: "90D", days: 90 },
-  { key: "6m", label: "6M", days: 183 },
-  { key: "1y", label: "1Y", days: 365 },
-  { key: "2y", label: "2Y", days: 730 },
-  { key: "all", label: "All", days: null },
-  { key: "custom", label: "Custom", days: null },
-] as const;
-type PresetKey = (typeof PRESETS)[number]["key"];
-
 const TITLES: Record<TrendGroup, string> = { day: "Daily activity", week: "Weekly activity", month: "Monthly activity" };
-
-interface SegmentedProps<K extends string> {
-  label: string;
-  value: K;
-  options: readonly { key: K; label: string }[];
-  onChange: (key: K) => void;
-}
-
-function Segmented<K extends string>({ label, value, options, onChange }: SegmentedProps<K>) {
-  return (
-    <div role="group" aria-label={label} className="inline-flex min-h-8 max-w-full flex-wrap items-center gap-0.5 rounded-lg bg-muted p-[3px] text-muted-foreground">
-      {options.map((o) => (
-        <button
-          key={o.key}
-          type="button"
-          aria-pressed={value === o.key}
-          onClick={() => onChange(o.key)}
-          className={cn(
-            "inline-flex h-[26px] items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-            value === o.key ? "bg-background text-foreground shadow-sm dark:bg-input/50" : "hover:text-foreground",
-          )}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 interface ActivityTrendsProps {
   /** One row per IST day, oldest first, with no gaps, ending today. */
   days: TrendRow[];
-  /** Star gains per month ("YYYY-MM") for months whose days are not all known. */
-  monthlyStars?: Record<string, number>;
+  /** Per-month values ("YYYY-MM") from an outside source, for months whose days are not all known. */
+  monthly?: MonthlyFill;
   /** Caveat about where the star numbers come from. */
   starsNote?: ReactNode;
   /** What one point on the chart covers. Fixed per card: a daily chart stays daily whatever the range. */
@@ -80,49 +37,15 @@ interface ActivityTrendsProps {
   presets?: readonly PresetKey[];
 }
 
-export function ActivityTrends({ days, monthlyStars, starsNote, group, defaultPreset = "60d", presets }: ActivityTrendsProps) {
-  const dataStart = days[0]?.date ?? "";
+export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset = "60d", presets }: ActivityTrendsProps) {
+  const dataStart = trendDataStart(days, monthly ?? {}, group);
   const today = days[days.length - 1]?.date ?? "";
-
-  const span = dataStart ? daysBetween(dataStart, today) + 1 : 0;
-  // A preset longer than the history would draw the same chart as "All".
-  const presetFits = (p: (typeof PRESETS)[number]) => p.days === null || p.days < span;
-  const [preset, setPreset] = useState<PresetKey>(() => (PRESETS.some((p) => p.key === defaultPreset && presetFits(p)) ? defaultPreset : "all"));
-  // `custom` is what the date inputs show; `applied` is the last valid pair, which is what gets drawn.
-  const [custom, setCustom] = useState({ from: "", to: "" });
-  const [applied, setApplied] = useState<{ from: string; to: string } | null>(null);
+  const rangeState = useTrendRange(dataStart, today, defaultPreset, presets);
   const [hidden, setHidden] = useState<ReadonlySet<TrendMetric>>(() => new Set(METRICS.filter((m) => !m.defaultOn).map((m) => m.key)));
 
-  const presetRange = (key: PresetKey): { from: string; to: string } => {
-    const p = PRESETS.find((x) => x.key === key);
-    if (!p?.days) return { from: dataStart, to: today };
-    const from = addDays(today, -(p.days - 1));
-    return { from: from < dataStart ? dataStart : from, to: today };
-  };
-
-  const isValid = (c: { from: string; to: string }) => isIsoDate(c.from) && isIsoDate(c.to) && c.from <= c.to && c.to >= dataStart && c.from <= today;
-  const customValid = isValid(custom);
-  const range =
-    preset === "custom" && applied ? { from: applied.from < dataStart ? dataStart : applied.from, to: applied.to > today ? today : applied.to } : presetRange(preset === "custom" ? "all" : preset);
-
-  const { rows, from, to } = trendWindow(days, range.from, range.to, group, monthlyStars);
+  const { rows, from, to } = trendWindow(days, rangeState.range.from, rangeState.range.to, group, monthly);
   const last = rows[rows.length - 1];
   const partialLast = last !== undefined && periodEnd(last.date, group) >= today;
-
-  const pickPreset = (key: PresetKey) => {
-    // Custom starts from whatever is on screen, so switching to it changes nothing until a date is edited.
-    if (key === "custom" && preset !== "custom") {
-      setCustom({ from, to });
-      setApplied({ from, to });
-    }
-    setPreset(key);
-  };
-
-  const editCustom = (patch: Partial<{ from: string; to: string }>) => {
-    const next = { ...custom, ...patch };
-    setCustom(next);
-    if (isValid(next)) setApplied(next);
-  };
 
   const toggle = (key: TrendMetric) =>
     setHidden((prev) => {
@@ -140,7 +63,6 @@ export function ActivityTrends({ days, monthlyStars, starsNote, group, defaultPr
   }
 
   const visible: ChartSeries[] = METRICS.filter((m) => !hidden.has(m.key)).map((m) => ({ key: m.key, label: m.label, color: m.color, type: "line" }));
-  const presetOptions = PRESETS.filter((p) => p.key === preset || ((!presets || presets.includes(p.key)) && presetFits(p)));
 
   const formatX = group === "month" ? formatMonth : formatShortDate;
   const formatXLong = (v: string) => {
@@ -155,39 +77,7 @@ export function ActivityTrends({ days, monthlyStars, starsNote, group, defaultPr
       title={TITLES[group]}
       subtitle={`New stars, forks, issues, PRs and commits per ${group}, ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}
     >
-      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <Segmented label="Time range" value={preset} options={presetOptions} onChange={pickPreset} />
-        {preset === "custom" && (
-          <div className="grid w-full grid-cols-[1fr_auto_1fr] items-center gap-1.5 sm:flex sm:w-auto">
-            <Input
-              type="date"
-              aria-label="From"
-              aria-invalid={!customValid}
-              value={custom.from}
-              min={dataStart}
-              max={today}
-              onChange={(e) => editCustom({ from: e.target.value })}
-              className="h-8 tnum sm:w-auto"
-            />
-            <ArrowRight className="size-3.5 text-muted-foreground" aria-hidden />
-            <Input
-              type="date"
-              aria-label="To"
-              aria-invalid={!customValid}
-              value={custom.to}
-              min={dataStart}
-              max={today}
-              onChange={(e) => editCustom({ to: e.target.value })}
-              className="h-8 tnum sm:w-auto"
-            />
-          </div>
-        )}
-      </div>
-      {preset === "custom" && !customValid && (
-        <p role="alert" className="mb-3 text-xs text-bad">
-          Pick a start date on or before the end date, between {formatDate(dataStart)} and {formatDate(today)}. The chart keeps the last valid range until then.
-        </p>
-      )}
+      <RangeControls state={rangeState} current={{ from, to }} />
 
       <ul className="mb-4 flex flex-wrap content-start gap-1.5" aria-label="Metrics">
         {METRICS.map((m) => {

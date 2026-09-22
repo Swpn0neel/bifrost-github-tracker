@@ -1,4 +1,5 @@
 import { query, queryOne } from "./db";
+import { env } from "./env";
 import { addDays, istDate, istMidnightUtc, type Slot } from "./time";
 
 // IST bucketing helpers. Columns are timestamptz; AT TIME ZONE yields IST wall-clock.
@@ -271,7 +272,7 @@ export interface DailyPoint extends DailyActivity, Totals {
 }
 
 // ---------------------------------------------------------------------------
-// Star history from an outside source (see external_star_gains)
+// Star history from an outside source (see external_gains)
 // ---------------------------------------------------------------------------
 
 /** The outside source is optional: a database that predates its table simply has no outside data. */
@@ -289,9 +290,9 @@ export async function externalDailyStars(from: string, to: string): Promise<Map<
   const rows = await optionalRows(() =>
     query<{ date: string; stars: number }>(
       `SELECT DISTINCT ON (period_start) period_start::text AS date, stars
-       FROM external_star_gains WHERE granularity = 'day' AND period_start BETWEEN $1 AND $2
+       FROM external_gains WHERE repo = $3 AND granularity = 'day' AND stars IS NOT NULL AND period_start BETWEEN $1 AND $2
        ORDER BY period_start, captured_at DESC`,
-      [from, to],
+      [from, to, env.repo],
     ),
   );
   return new Map(rows.map((r) => [r.date, r.stars]));
@@ -302,8 +303,9 @@ export async function externalMonthlyStars(): Promise<Record<string, number>> {
   const rows = await optionalRows(() =>
     query<{ month: string; stars: number }>(
       `SELECT DISTINCT ON (period_start) to_char(period_start, 'YYYY-MM') AS month, stars
-       FROM external_star_gains WHERE granularity = 'month'
+       FROM external_gains WHERE repo = $1 AND granularity = 'month' AND stars IS NOT NULL
        ORDER BY period_start, captured_at DESC`,
+      [env.repo],
     ),
   );
   return Object.fromEntries(rows.map((r) => [r.month, r.stars]));

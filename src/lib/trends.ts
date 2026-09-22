@@ -47,42 +47,70 @@ export interface TrendWindow {
   to: string;
 }
 
+/** Per-month values ("YYYY-MM") from an outside source, for months whose days are not all known. */
+export type MonthlyFill = Record<string, Partial<Record<TrendMetric, number>>>;
+
+/** First day the chart can show: the first day row, or for the month grouping an earlier month the outside source covers. Empty when there is nothing. */
+export function trendDataStart(days: TrendRow[], monthly: MonthlyFill, group: TrendGroup): string {
+  const firstDay = days[0]?.date ?? "";
+  if (group !== "month") return firstDay;
+  const firstMonth = Object.keys(monthly).sort()[0];
+  const monthDay = firstMonth ? `${firstMonth}-01` : "";
+  if (!firstDay) return monthDay;
+  return monthDay && monthDay < firstDay ? monthDay : firstDay;
+}
+
 /**
  * Groups a contiguous run of days (oldest first, one row per day) into periods.
  * The requested range is widened outwards to whole periods, so the only period that
  * can be incomplete is the one the data ends in.
  *
  * A period with an unknown day is unknown as a whole: a sum over only the known days
- * would pass for the full period. `monthlyStars` ("YYYY-MM" -> gain) fills such months
- * in the month grouping.
+ * would pass for the full period. `monthly` fills such months in the month grouping,
+ * and lets that grouping reach back to months before the first day row.
  */
-export function trendWindow(days: TrendRow[], from: string, to: string, group: TrendGroup, monthlyStars: Record<string, number> = {}): TrendWindow {
-  if (days.length === 0) return { rows: [], from, to };
-  const first = days[0].date;
-  const last = days[days.length - 1].date;
+export function trendWindow(days: TrendRow[], from: string, to: string, group: TrendGroup, monthly: MonthlyFill = {}): TrendWindow {
+  const first = trendDataStart(days, monthly, group);
+  const last = days.length ? days[days.length - 1].date : first ? periodEnd(`${Object.keys(monthly).sort().at(-1)}-01`, "month") : "";
+  if (!first || !last) return { rows: [], from, to };
   const clamp = (d: string) => (d < first ? first : d > last ? last : d);
   const lo = clamp(periodStart(clamp(from), group));
   const hi = clamp(periodEnd(clamp(to), group));
   if (lo > hi) return { rows: [], from: lo, to: hi };
 
+  // A day before the first row does not exist (the period is a partial sum); one inside the run that has no row is unknown.
+  const firstDay = days[0]?.date ?? "";
+  const dayAt = (d: string): TrendRow | undefined => {
+    if (!firstDay || d < firstDay) return undefined;
+    return days[daysBetween(firstDay, d)];
+  };
+
   const rows: TrendRow[] = [];
-  let unknown = new Set<TrendMetric>();
-  for (const day of days.slice(daysBetween(first, lo), daysBetween(first, hi) + 1)) {
-    const key = periodStart(day.date, group);
-    let row = rows[rows.length - 1];
-    if (!row || row.date !== key) {
-      row = { date: key, stars: 0, forks: 0, issues_opened: 0, issues_closed: 0, prs_opened: 0, prs_merged: 0, commits: 0 };
-      rows.push(row);
-      unknown = new Set();
+  for (let p = periodStart(lo, group); p <= hi; p = addDays(periodEnd(p, group), 1)) {
+    const row: TrendRow = { date: p, stars: 0, forks: 0, issues_opened: 0, issues_closed: 0, prs_opened: 0, prs_merged: 0, commits: 0 };
+    const fill = group === "month" ? monthly[p.slice(0, 7)] : undefined;
+    const unknown = new Set<TrendMetric>();
+    let existing = 0;
+    const end = periodEnd(p, group) < hi ? periodEnd(p, group) : hi;
+    for (let d = p < lo ? lo : p; d <= end; d = addDays(d, 1)) {
+      if (!firstDay || d < firstDay) {
+        // Before the first row nothing was recorded: the period is a partial sum, unless
+        // the outside source has the whole month, which then beats the partial sum.
+        for (const m of TREND_METRICS) if (fill?.[m] !== undefined) unknown.add(m);
+        continue;
+      }
+      existing++;
+      const day = dayAt(d);
+      for (const m of TREND_METRICS) {
+        const v = day ? day[m] : null;
+        if (v === null) unknown.add(m);
+        row[m] = unknown.has(m) ? null : (row[m] ?? 0) + (v ?? 0);
+      }
     }
     for (const m of TREND_METRICS) {
-      const v = day[m];
-      if (v === null) unknown.add(m);
-      row[m] = unknown.has(m) ? null : (row[m] ?? 0) + (v ?? 0);
+      if (existing === 0 || unknown.has(m)) row[m] = fill?.[m] ?? null;
     }
-  }
-  if (group === "month") {
-    for (const row of rows) if (row.stars === null) row.stars = monthlyStars[row.date.slice(0, 7)] ?? null;
+    rows.push(row);
   }
   return { rows, from: lo, to: hi };
 }

@@ -12,7 +12,7 @@
     "sync": "tsx src/collector/run.ts sync",
     "backfill": "tsx src/collector/run.ts backfill",
     "db:migrate": "tsx scripts/migrate.ts",
-    "import:stars": "tsx scripts/import-star-history.ts"
+    "import:history": "tsx scripts/import-history.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

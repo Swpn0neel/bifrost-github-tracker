@@ -61,24 +61,58 @@ export function parseLastPage(link: string | null): number | null {
   return match ? Number(match[1]) : null;
 }
 
-export class GitHubClient {
-  calls = 0;
-  rateRemaining: number | null = null;
-  rateReset: Date | null = null;
+/** Counters shared by every client of one run, so a run's API-call total covers all the repos it touched. */
+interface ClientState {
+  calls: number;
+  rateRemaining: number | null;
+  rateReset: Date | null;
   /** Set when GitHub rejects the configured token; requests continue anonymously. */
-  tokenRejected = false;
+  tokenRejected: boolean;
+}
+
+export class GitHubClient {
   readonly owner: string;
   readonly name: string;
+  private readonly state: ClientState;
 
-  constructor(private readonly opts: GitHubClientOptions) {
+  constructor(
+    private readonly opts: GitHubClientOptions,
+    state?: ClientState,
+  ) {
     const [owner, name] = opts.repo.split("/");
     if (!owner || !name) throw new Error(`GITHUB_REPO must be owner/name, got "${opts.repo}"`);
     this.owner = owner;
     this.name = name;
+    this.state = state ?? { calls: 0, rateRemaining: null, rateReset: null, tokenRejected: false };
+  }
+
+  /** A client for another repository that shares this one's token, log and counters. */
+  forRepo(repo: string): GitHubClient {
+    return new GitHubClient({ ...this.opts, repo }, this.state);
+  }
+
+  get calls(): number {
+    return this.state.calls;
+  }
+
+  get rateRemaining(): number | null {
+    return this.state.rateRemaining;
+  }
+
+  get rateReset(): Date | null {
+    return this.state.rateReset;
+  }
+
+  get tokenRejected(): boolean {
+    return this.state.tokenRejected;
   }
 
   get hasToken(): boolean {
-    return Boolean(this.opts.token) && !this.tokenRejected;
+    return Boolean(this.opts.token) && !this.state.tokenRejected;
+  }
+
+  get fullName(): string {
+    return `${this.owner}/${this.name}`;
   }
 
   repoPath(sub = ""): string {
@@ -99,21 +133,21 @@ export class GitHubClient {
     if (body !== undefined) headers["Content-Type"] = "application/json";
 
     for (let attempt = 1; ; attempt++) {
-      this.calls++;
+      this.state.calls++;
       const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 
       // A revoked or mistyped token would otherwise kill every run; fall back to
       // anonymous access (60 req/hr) so the headline snapshot still gets taken.
       if (res.status === 401 && this.hasToken) {
-        this.tokenRejected = true;
+        this.state.tokenRejected = true;
         delete headers.Authorization;
         this.opts.log?.("GitHub rejected GITHUB_TOKEN (401 Bad credentials); continuing unauthenticated at 60 req/hr");
         continue;
       }
       const remaining = res.headers.get("x-ratelimit-remaining");
-      if (remaining !== null) this.rateRemaining = Number(remaining);
+      if (remaining !== null) this.state.rateRemaining = Number(remaining);
       const reset = res.headers.get("x-ratelimit-reset");
-      if (reset) this.rateReset = new Date(Number(reset) * 1000);
+      if (reset) this.state.rateReset = new Date(Number(reset) * 1000);
 
       if (res.ok) {
         const data = (res.status === 204 ? null : await res.json()) as T;
@@ -129,7 +163,7 @@ export class GitHubClient {
       let waitMs = 2 ** attempt * 1000;
       const retryAfter = res.headers.get("retry-after");
       if (retryAfter) waitMs = Number(retryAfter) * 1000;
-      else if (remaining === "0" && this.rateReset) waitMs = Math.max(1000, this.rateReset.getTime() - Date.now() + 1000);
+      else if (remaining === "0" && this.state.rateReset) waitMs = Math.max(1000, this.state.rateReset.getTime() - Date.now() + 1000);
       waitMs = Math.min(waitMs, 5 * 60_000);
       this.opts.log?.(`GitHub ${res.status} on ${url.pathname}; retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt})`);
       await sleep(waitMs);

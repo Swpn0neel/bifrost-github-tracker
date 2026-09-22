@@ -1,6 +1,7 @@
 import { GitHubClient } from "../lib/github";
 import { env } from "../lib/env";
 import { query, queryOne } from "../lib/db";
+import { snapshotTrackedRepos } from "./repos";
 import { takeSnapshot } from "./snapshot";
 import { getState, runSync, type Log } from "./sync";
 
@@ -102,12 +103,14 @@ export function runSnapshotJob(triggeredBy: Trigger): Promise<JobResult> {
         `${v.open_issues} open issues, ${v.open_prs} open PRs, ${v.contributors ?? "?"} contributors`,
     );
     const snapshotDetail = { id: snap.id, ist_date: snap.ist_date, slot: snap.slot, ...v };
+    // The Compare page's repos are read straight after, so their numbers sit close to this reading in time.
+    const compare = await snapshotTrackedRepos(gh, log, triggeredBy);
     if (!gh.hasToken) {
       // 60 req/hr is not enough to walk event pages; the snapshot alone still works.
       log("no GITHUB_TOKEN: skipping event sync");
       return {
         status: "partial",
-        detail: { snapshot: snapshotDetail, sync: {}, syncErrors: ["event sync skipped: GITHUB_TOKEN not set"], rateRemaining: gh.rateRemaining },
+        detail: { snapshot: snapshotDetail, compare, sync: {}, syncErrors: ["event sync skipped: GITHUB_TOKEN not set"], rateRemaining: gh.rateRemaining },
       };
     }
     // Full stargazer re-walk once a day (the midnight run) so unstars are detected.
@@ -115,8 +118,8 @@ export function runSnapshotJob(triggeredBy: Trigger): Promise<JobResult> {
     const fullStars = (snap.slot === 0 && triggeredBy === "cron") || neverFullySynced;
     const sync = await runSync(gh, log, { repo: snap.repo, full: false, fullStars });
     return {
-      status: sync.errors.length ? "partial" : "ok",
-      detail: { snapshot: snapshotDetail, sync: sync.counts, syncErrors: sync.errors, rateRemaining: gh.rateRemaining },
+      status: sync.errors.length || compare.errors.length ? "partial" : "ok",
+      detail: { snapshot: snapshotDetail, compare, sync: sync.counts, syncErrors: sync.errors, rateRemaining: gh.rateRemaining },
     };
   });
 }

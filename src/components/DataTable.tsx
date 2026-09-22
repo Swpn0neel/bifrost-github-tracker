@@ -17,9 +17,11 @@ interface DataTableProps<T> {
   rowKey: (row: T) => string | number;
   emptyText?: string;
   dense?: boolean;
+  /** Extra classes for one row, e.g. to mark the row the others are measured against. */
+  rowClassName?: (row: T) => string | undefined;
 }
 
-export function DataTable<T>({ columns, rows, rowKey, emptyText = "No rows", dense = false }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, emptyText = "No rows", dense = false, rowClassName }: DataTableProps<T>) {
   if (rows.length === 0) return <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">{emptyText}</p>;
   const pad = dense ? "px-2.5 py-2" : "px-3 py-2.5";
   return (
@@ -35,7 +37,7 @@ export function DataTable<T>({ columns, rows, rowKey, emptyText = "No rows", den
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <TableRow key={rowKey(row)}>
+          <TableRow key={rowKey(row)} className={rowClassName?.(row)}>
             {columns.map((c) => (
               <TableCell key={c.key} className={cn(pad, c.align === "right" ? "text-right tnum" : "text-left whitespace-normal", c.className)}>
                 {c.render(row)}

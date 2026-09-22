@@ -17,9 +17,10 @@ export function RefreshButton() {
     setState("running");
     try {
       const res = await fetch("/api/refresh", { method: "POST" });
-      const json = (await res.json()) as { status?: string; apiCalls?: number; error?: string; detail?: { syncErrors?: string[] } };
+      const json = (await res.json()) as { status?: string; apiCalls?: number; error?: string; detail?: { syncErrors?: string[]; compare?: { errors?: string[] } } };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      const warnings = json.detail?.syncErrors?.length ? ` · ${json.detail.syncErrors.length} sync warning(s)` : "";
+      const warningCount = (json.detail?.syncErrors?.length ?? 0) + (json.detail?.compare?.errors?.length ?? 0);
+      const warnings = warningCount ? ` · ${warningCount} warning(s)` : "";
       toast.success("Live numbers updated", { description: `${json.apiCalls ?? "?"} API calls${warnings}` });
       setState("done");
       router.refresh();

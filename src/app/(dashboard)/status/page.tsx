@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { env } from "@/lib/env";
 import { formatInt } from "@/lib/format";
+import { repoSnapshotCount } from "@/lib/compare";
 import { collectorRuns, latestSnapshot, syncState, tableCounts } from "@/lib/queries";
 import { nextRun } from "@/lib/schedule";
 import { formatIstDateTime, formatRelative } from "@/lib/time";
@@ -49,7 +50,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default async function StatusPage() {
-  const [runs, latest, counts, state] = await Promise.all([collectorRuns(40), latestSnapshot(), tableCounts(), syncState()]);
+  const [runs, latest, counts, state, compareSnapshots] = await Promise.all([collectorRuns(40), latestSnapshot(), tableCounts(), syncState(), repoSnapshotCount()]);
   const lastRun = runs[0];
   const hasToken = Boolean(env.githubToken);
   const failures = runs.filter((r) => r.status === "error").length;
@@ -81,6 +82,7 @@ export default async function StatusPage() {
               { k: "Pull requests", v: counts.prs },
               { k: "Commits", v: counts.commits },
               { k: "Releases", v: counts.releases },
+              { k: "Compare readings (other repos)", v: compareSnapshots },
             ]}
             rowKey={(r) => r.k}
             dense
