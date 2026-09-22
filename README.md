@@ -47,6 +47,8 @@ It reads the repository page once and loads the periods (UTC) into `external_gai
 
 The **Compare** page tracks any public repository next to Bifrost. Adding one (`owner/name` or a GitHub URL) takes its first reading immediately; after that every collector run reads it too, right after Bifrost, in one GraphQL request plus two REST count requests per repository.
 
+**Star history for a compared repository.** Our readings define every day from the day after it was added (a day's gain is that day's last reading minus the previous day's). The day it was added has no earlier reading to measure from, and days before that have none at all, so those come from Trendshift when a Trendshift link (`trendshift.io/repositories/<id>`) is given in the add form: the history (about 60 daily days and 24 months) is imported at once, and the first scheduled run after the add day has ended (Trendshift publishes a day once it is over, UTC) fetches the page one more time to fill that day. After that the source is not consulted again for the repository. Without a link, daily star history simply starts with the first reading; a link can be added later with `npm run import:history -- --trendshift <id> --repo owner/name`, after which the scheduled fill happens the same way.
+
 Compared repositories get the same event history as Bifrost: the first cron run after one is added walks all of its issues, pull requests, commits, forks and releases (one repository per run, since a large one takes a few minutes and a few hundred to a thousand requests), and every later run syncs the new events. From then on its daily forks, issues, PRs, commits, contributors and releases are exact back to the repository's creation, reconstructed from event timestamps exactly as for Bifrost. Until that first walk has happened, its daily activity is the change between consecutive day-close readings, with the outside source (above) filling in earlier days. A walk cut short is resumed by the next run: a step that finished carries on from its cursor, one that did not starts over. To load or resume one right away instead of waiting for the schedule:
 
 ```bash
@@ -55,7 +57,7 @@ npm run sync -- owner/name
 
 (`npm run backfill -- owner/name` re-walks every endpoint even where a cursor exists, for repairs.) GitHub only serves the first ~10,000 rows of a list by page number; past that the client follows the cursor links GitHub returns.
 
-Stars are the exception for every repository, Bifrost included: GitHub hides the stargazer list, so daily star gains come from our readings from the day a repository was added, from the outside source before that (about 60 days), and only per month further back (about two years). The compare views draw the last two years.
+Stars are the exception for every repository, Bifrost included: GitHub hides the stargazer list, so daily star gains come from our readings, from the outside source before those began (about 60 days), and only per month further back (about two years). The compare views draw the last two years.
 
 The event tables carry a `repo` column; rows without one belong to Bifrost. The dashboard's own pages only ever read Bifrost's rows. Removing a repository only hides it (`tracked_repos.removed_at`, after typing its name to confirm); its readings and events stay, and adding it again brings the history back. The page needs `GITHUB_TOKEN` (GraphQL).
 

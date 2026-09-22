@@ -5,7 +5,8 @@
 import { GitHubClient, GitHubError } from "../lib/github";
 import { query, queryOne } from "../lib/db";
 import { getState, runSync, setState, type Log } from "./sync";
-import { istDate, istSlot } from "../lib/time";
+import { daysBetween, istDate, istSlot } from "../lib/time";
+import { fetchTrendshift, importCapture } from "../lib/trendshift";
 
 export interface RepoFacts {
   github_id: number | null;
@@ -254,6 +255,55 @@ export async function syncTrackedRepos(gh: GitHubClient, log: Log, repos: Snapsh
     }
   }
   if (result.waiting.length) log(`compare: ${result.waiting.join(", ")} still waiting for a full event backfill (next cron run)`);
+  return result;
+}
+
+/**
+ * Whether a repo's outside history needs (another) import. The source publishes a day only
+ * once it has ended (UTC), so the day a repo was added, whose gain our readings cannot
+ * measure (there is no earlier reading), is fetched by the first run after that day; after
+ * it our readings cover every day and the source is not consulted again.
+ */
+export function trendshiftImportDue(firstReadingDay: string | null, lastImportedDay: string | null, todayUtc: string): "initial" | "fill" | null {
+  if (lastImportedDay === null) return "initial";
+  if (firstReadingDay === null || lastImportedDay >= firstReadingDay) return null;
+  // The day should be published the next day; a source that has not caught up after a few days is left alone.
+  const since = daysBetween(firstReadingDay, todayUtc);
+  return since >= 1 && since <= TRENDSHIFT_FILL_DAYS ? "fill" : null;
+}
+
+/** How many days after a repo's first reading the scheduled runs keep trying to fetch that day from Trendshift. */
+export const TRENDSHIFT_FILL_DAYS = 3;
+
+export interface TrendshiftFillResult {
+  imported: string[];
+  errors: string[];
+}
+
+/** One page fetch per compared repo that still needs its outside history (see trendshiftImportDue). */
+export async function fillTrendshiftHistory(log: Log): Promise<TrendshiftFillResult> {
+  const result: TrendshiftFillResult = { imported: [], errors: [] };
+  const repos = await query<{ id: number; full_name: string; trendshift_id: number; first_day: string | null; last_day: string | null }>(
+    `SELECT t.id, t.full_name, t.trendshift_id,
+       (SELECT min(ist_date)::text FROM repo_snapshots s WHERE s.repo_id = t.id) AS first_day,
+       (SELECT max(period_start)::text FROM external_gains g WHERE g.repo = t.full_name AND g.source = 'trendshift' AND g.granularity = 'day') AS last_day
+     FROM tracked_repos t WHERE t.removed_at IS NULL AND t.trendshift_id IS NOT NULL ORDER BY t.id`,
+  );
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  for (const repo of repos) {
+    const due = trendshiftImportDue(repo.first_day, repo.last_day, todayUtc);
+    if (!due) continue;
+    try {
+      const capture = await fetchTrendshift(repo.trendshift_id, repo.full_name);
+      const summary = await importCapture(capture);
+      result.imported.push(repo.full_name);
+      log(`compare ${repo.full_name}: ${due === "initial" ? "history" : `day ${repo.first_day}`} from Trendshift: ${summary.days} days, ${summary.months} months (through ${summary.lastDay ?? "—"})`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result.errors.push(`${repo.full_name} trendshift: ${message}`);
+      log(`compare ${repo.full_name} Trendshift import FAILED: ${message}`);
+    }
+  }
   return result;
 }
 

@@ -118,6 +118,12 @@ export default async function ComparedRepoPage({ params }: { params: Promise<{ o
         <p className="px-1 text-xs text-pretty text-muted-foreground">
           {c.first_snapshot ? `Readings four times a day since ${formatDate(c.first_snapshot)}; activity is the change between day-close readings (IST).` : "No readings yet."}
           {estimatedDays > 0 && <> Days before that come from {trendshift} (UTC days) as estimates; it has no PRs-opened or commit counts, so those start with our readings.</>}
+          {estimatedDays === 0 && c.first_snapshot && !c.trendshift_id && (
+            <>
+              {" "}
+              No Trendshift link was given, so daily star history starts with the first reading; to add one later run <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">npm run import:history -- --trendshift &lt;id&gt; --repo {c.full_name}</code>.
+            </>
+          )}
         </p>
       </section>
 
