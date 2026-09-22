@@ -7,7 +7,7 @@ Internal dashboard that snapshots `maximhq/bifrost` on GitHub four times a day (
 - **Quarters** – the four daily windows: stacked per day, weekday × window heatmap, net change between snapshots.
 - **Issues & PRs** – opened vs closed, backlog, median time to close/merge, merge rate, age buckets, labels, oldest and most-discussed.
 - **Activity** – commits, new contributors, releases, top contributors.
-- **Compare** – other repositories (competitors) read at the same four times a day, side by side with Bifrost: a leaderboard with today / 7 d / 30 d star gains, daily and monthly comparison charts with a metric switch and one line per repository, and a page per repository. Add or remove repositories on the page itself.
+- **Compare** – other repositories (competitors) read at the same four times a day, side by side with Bifrost: a leaderboard with today / 7 d / 30 d star gains, daily and monthly comparison charts with a metric switch and one line per repository (per period, 7-day average or cumulative; as counts or, for stars and forks, as a percentage of each repository's own total, so an 8k repository and a 60k one compare on growth rate), and a page per repository. Add or remove repositories on the page itself.
 - **Status** – collector runs, next scheduled run, table counts, sync cursors.
 
 ## How the numbers are defined

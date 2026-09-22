@@ -8,7 +8,7 @@ import { DataTable } from "@/components/DataTable";
 import { Hint } from "@/components/Hint";
 import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/badge";
-import { comparedRepos, toTrendRows, type ComparedRepo } from "@/lib/compare";
+import { comparedRepos, toTrendRows, type ComparedRepo, type RepoDay } from "@/lib/compare";
 import { repoColor } from "@/lib/compare-ui";
 import { fixed, formatInt, signed } from "@/lib/format";
 import { formatDate, formatIstDateTime, istDate } from "@/lib/time";
@@ -93,7 +93,17 @@ export default async function ComparePage() {
     primary: r.primary,
     note: r.captured_at ? undefined : "no readings yet",
   }));
-  const series: CompareSeries[] = repos.map((r, i) => ({ key: r.key, label: r.full_name, color: repoColor(i), primary: r.primary, days: toTrendRows(r.days), monthly: r.monthly }));
+  // Known end-of-day totals, the bases of the "% of total" scale.
+  const totalsOf = (days: RepoDay[], key: "stars" | "forks") => Object.fromEntries(days.filter((d) => d[key] !== null).map((d) => [d.date, d[key] as number]));
+  const series: CompareSeries[] = repos.map((r, i) => ({
+    key: r.key,
+    label: r.full_name,
+    color: repoColor(i),
+    primary: r.primary,
+    days: toTrendRows(r.days),
+    monthly: r.monthly,
+    totals: { stars: totalsOf(r.days, "stars"), forks: totalsOf(r.days, "forks") },
+  }));
   const estimated = others.some((r) => r.days.some((d) => d.gains_estimated));
 
   return (

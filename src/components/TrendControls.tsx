@@ -29,7 +29,7 @@ export interface DateSpan {
 interface SegmentedProps<K extends string> {
   label: string;
   value: K;
-  options: readonly { key: K; label: string }[];
+  options: readonly { key: K; label: string; disabled?: boolean; title?: string }[];
   onChange: (key: K) => void;
 }
 
@@ -41,9 +41,11 @@ export function Segmented<K extends string>({ label, value, options, onChange }:
           key={o.key}
           type="button"
           aria-pressed={value === o.key}
+          disabled={o.disabled}
+          title={o.title}
           onClick={() => onChange(o.key)}
           className={cn(
-            "inline-flex h-[26px] items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+            "inline-flex h-[26px] items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50",
             value === o.key ? "bg-background text-foreground shadow-sm dark:bg-input/50" : "hover:text-foreground",
           )}
         >

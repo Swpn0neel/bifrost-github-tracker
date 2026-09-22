@@ -26,6 +26,10 @@ interface TimeSeriesChartProps {
   formatX?: (v: string) => string;
   formatXLong?: (v: string) => string;
   formatY?: (v: number) => string;
+  /** How a value reads in the tooltip; whole numbers by default. */
+  formatValue?: (v: number) => string;
+  /** Let the y-axis tick at fractions, for rates and percentages. */
+  decimals?: boolean;
   /** Set to false when the caller renders its own legend. */
   legend?: boolean;
   /** The last row is a period still in progress: lines reach it with a dashed segment. */
@@ -85,6 +89,8 @@ export function TimeSeriesChart({
   formatX = formatShortDate,
   formatXLong = formatDate,
   formatY = defaultFormatY,
+  formatValue = formatInt,
+  decimals = false,
   legend = true,
   partialLast = false,
 }: TimeSeriesChartProps) {
@@ -147,11 +153,11 @@ export function TimeSeriesChart({
             tickFormatter={(v) => formatY(Number(v))}
             width={48}
             domain={domain}
-            allowDecimals={false}
+            allowDecimals={decimals}
           />
           <ChartTooltip
             cursor={hasBars ? { fill: "var(--muted)", fillOpacity: 0.7 } : { stroke: "var(--axis)", strokeWidth: 1 }}
-            content={<ChartTooltipBody series={series} formatXLong={formatXLong} formatValue={formatInt} />}
+            content={<ChartTooltipBody series={series} formatXLong={formatXLong} formatValue={formatValue} />}
             isAnimationActive={false}
           />
           {series.map((s) => {
