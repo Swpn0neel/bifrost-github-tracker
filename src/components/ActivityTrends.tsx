@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { Card } from "@/components/Card";
 import { TimeSeriesChart, type ChartSeries } from "@/components/TimeSeriesChart";
 import { formatInt } from "@/lib/format";
-import { formatDate, formatMonth, formatShortDate } from "@/lib/time";
+import { formatDate, formatDateWithDay, formatMonth, formatShortDate } from "@/lib/time";
 import { periodEnd, trendDataStart, trendWindow, type MonthlyFill, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
 import { cn } from "@/lib/utils";
 import { RangeControls, useTrendRange, type PresetKey } from "./TrendControls";
@@ -66,7 +66,7 @@ export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset 
 
   const formatX = group === "month" ? formatMonth : formatShortDate;
   const formatXLong = (v: string) => {
-    const name = group === "month" ? formatMonth(v) : group === "week" ? `Week of ${formatDate(v)}` : formatDate(v);
+    const name = group === "month" ? formatMonth(v) : group === "week" ? `Week of ${formatDate(v)}` : formatDateWithDay(v);
     return partialLast && v === last?.date ? `${name} · so far` : name;
   };
 

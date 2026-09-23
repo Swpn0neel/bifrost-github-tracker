@@ -7,7 +7,7 @@ import { RangeControls, Segmented, useTrendRange, type PresetKey } from "@/compo
 import { COMPARE_METRICS } from "@/lib/compare-ui";
 import { formatInt } from "@/lib/format";
 import { rollingMean } from "@/lib/stats";
-import { addDays, formatDate, formatMonth, formatShortDate, monthStart } from "@/lib/time";
+import { addDays, formatDate, formatDateWithDay, formatMonth, formatShortDate, monthStart } from "@/lib/time";
 import { periodEnd, periodStart, trendDataStart, trendWindow, type MonthlyFill, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
 import { cn } from "@/lib/utils";
 
@@ -158,7 +158,7 @@ function CompareTrends({ series, group, today, defaultPreset, presets }: Compare
   const visible: ChartSeries[] = series.filter((s) => !hidden.has(s.key) && s.days.length > 0).map((s) => ({ key: s.key, label: s.label, color: s.color, type: "line" }));
   const formatX = group === "month" ? formatMonth : formatShortDate;
   const formatXLong = (v: string) => {
-    const name = group === "month" ? formatMonth(v) : formatDate(v);
+    const name = group === "month" ? formatMonth(v) : formatDateWithDay(v);
     return partialLast && v === last ? `${name} · so far` : name;
   };
   const span = from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`;

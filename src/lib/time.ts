@@ -70,6 +70,11 @@ export function formatDate(date: string): string {
   return `${d} ${MONTHS[m - 1]} ${y}`;
 }
 
+/** "2026-09-23" -> "23 Sep 2026 (Wed)": the weekday in brackets, so a weekend dip reads as one. */
+export function formatDateWithDay(date: string): string {
+  return `${formatDate(date)} (${WEEKDAY_LABELS[weekday(date)]})`;
+}
+
 export function formatShortDate(date: string): string {
   const [, m, d] = date.split("-").map(Number);
   return `${d} ${MONTHS[m - 1]}`;

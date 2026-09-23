@@ -5,7 +5,7 @@ import { Area, Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "rec
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import { CHART_RESIZE_SETTLE_MS, STRETCH_WHILE_RESIZING } from "./chart-resize";
 import { compact, formatInt } from "@/lib/format";
-import { formatDate, formatShortDate } from "@/lib/time";
+import { formatDateWithDay, formatShortDate } from "@/lib/time";
 
 export interface ChartSeries {
   key: string;
@@ -23,7 +23,9 @@ interface TimeSeriesChartProps {
   /** Bars must start at zero; trend lines may not. */
   zeroBased?: boolean;
   xKey?: string;
+  /** Axis tick; a short date by default. */
   formatX?: (v: string) => string;
+  /** Tooltip heading; the full date with its weekday by default. */
   formatXLong?: (v: string) => string;
   formatY?: (v: number) => string;
   /** How a value reads in the tooltip; whole numbers by default. */
@@ -87,7 +89,7 @@ export function TimeSeriesChart({
   zeroBased = true,
   xKey = "date",
   formatX = formatShortDate,
-  formatXLong = formatDate,
+  formatXLong = formatDateWithDay,
   formatY = defaultFormatY,
   formatValue = formatInt,
   decimals = false,
