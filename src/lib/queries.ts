@@ -95,19 +95,30 @@ export async function dataStartDate(): Promise<string> {
 }
 
 /**
- * A scheduled snapshot is one the collector CLI took within the first hour of its
- * window. Dashboard refreshes and off-schedule runs (Railway "Run now", a late
- * retry) still update the live numbers, but they never override a scheduled
- * reading: windows use scheduled readings only, and a day falls back to other
- * readings only when it has no scheduled one at all.
+ * A reading counts by when it was taken, not by what triggered it: the cron run at a
+ * window's start and a dashboard refresh (or a Railway "Run now") store the same kind
+ * of snapshot. An on-time reading is one taken within the first hour of its window;
+ * it is the window's start reading, whether the scheduled run took it or a refresh
+ * stood in for a missed one.
  */
-const SCHEDULED = `(s.triggered_by = 'cron'
-  AND s.captured_at < timezone('Asia/Kolkata', s.ist_date::timestamp) + make_interval(hours => s.slot) + interval '60 minutes')`;
+const ON_TIME = `(s.captured_at < timezone('Asia/Kolkata', s.ist_date::timestamp) + make_interval(hours => s.slot) + interval '60 minutes')`;
+
+/** An on-time reading in the 12 AM window: what closes the previous day. */
+const MIDNIGHT = `(s.slot = 0 AND ${ON_TIME})`;
 
 /**
- * The "close of day" snapshot for each day: the latest scheduled reading from
- * D 6 AM through D+1 12 AM (the next day's midnight run when it exists). A day
- * without any scheduled reading uses the last snapshot taken on it instead.
+ * Ordering that puts a day's close first among its candidate readings: the reading
+ * nearest the following midnight when one exists, otherwise the day's latest reading.
+ * `dayExpr` is the day being closed.
+ */
+const closeOrder = (dayExpr: string) =>
+  `(s.ist_date = ${dayExpr} + 1) DESC, CASE WHEN s.ist_date = ${dayExpr} + 1 THEN s.captured_at END ASC, s.captured_at DESC`;
+
+/**
+ * The "close of day" snapshot for each day: the reading at the following midnight
+ * (the 12 AM run, or a refresh in that first hour when the run is missing). Until
+ * that exists, the day's latest reading of any kind, so today's figures follow a
+ * refresh; a past day is settled once its midnight reading is in.
  */
 export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRow & { date: string })[]> {
   return query<SnapshotRow & { date: string }>(
@@ -115,9 +126,8 @@ export function dayCloseSnapshots(from: string, to: string): Promise<(SnapshotRo
      SELECT DISTINCT ON (days.d) days.d::text AS date, ${SNAPSHOT_COLS}
      FROM days
      JOIN snapshots s
-       ON (${SCHEDULED} AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0)))
-       OR (NOT ${SCHEDULED} AND s.ist_date = days.d)
-     ORDER BY days.d, ${SCHEDULED} DESC, s.ist_date DESC, s.slot DESC, s.captured_at DESC`,
+       ON (s.ist_date = days.d + 1 AND ${MIDNIGHT}) OR s.ist_date = days.d
+     ORDER BY days.d, ${closeOrder("days.d")}`,
     [from, to],
   );
 }
@@ -153,10 +163,8 @@ export function repoDayCloseSnapshots(repoId: number, from: string, to: string):
      SELECT DISTINCT ON (days.d) days.d::text AS date, ${REPO_SNAP_COLS}
      FROM days
      JOIN repo_snapshots s
-       ON s.repo_id = $1 AND (
-         (${SCHEDULED} AND ((s.ist_date = days.d AND s.slot >= 6) OR (s.ist_date = days.d + 1 AND s.slot = 0)))
-         OR (NOT ${SCHEDULED} AND s.ist_date = days.d))
-     ORDER BY days.d, ${SCHEDULED} DESC, s.ist_date DESC, s.slot DESC, s.captured_at DESC`,
+       ON s.repo_id = $1 AND ((s.ist_date = days.d + 1 AND ${MIDNIGHT}) OR s.ist_date = days.d)
+     ORDER BY days.d, ${closeOrder("days.d")}`,
     [repoId, from, to],
   );
 }
@@ -539,12 +547,24 @@ export interface SlotSnapshot {
   open_prs: number;
 }
 
-/** The scheduled reading at the start of each 6-hour window. */
+const SLOT_SNAP_COLS = "s.ist_date::text AS date, s.slot, s.captured_at, s.stars, s.forks, s.watchers, s.open_issues, s.open_prs";
+
+/** The reading at the start of each 6-hour window: the earliest on-time one, whoever triggered it. */
 export function slotSnapshots(from: string, to: string): Promise<SlotSnapshot[]> {
   return query<SlotSnapshot>(
-    `SELECT DISTINCT ON (s.ist_date, s.slot) s.ist_date::text AS date, s.slot, s.captured_at, s.stars, s.forks, s.watchers, s.open_issues, s.open_prs
-     FROM snapshots s WHERE s.ist_date BETWEEN $1 AND $2 AND ${SCHEDULED}
+    `SELECT DISTINCT ON (s.ist_date, s.slot) ${SLOT_SNAP_COLS}
+     FROM snapshots s WHERE s.ist_date BETWEEN $1 AND $2 AND ${ON_TIME}
      ORDER BY s.ist_date, s.slot, s.captured_at ASC`,
+    [from, to],
+  );
+}
+
+/** The latest reading taken inside each 6-hour window, on time or not. */
+export function slotLastSnapshots(from: string, to: string): Promise<SlotSnapshot[]> {
+  return query<SlotSnapshot>(
+    `SELECT DISTINCT ON (s.ist_date, s.slot) ${SLOT_SNAP_COLS}
+     FROM snapshots s WHERE s.ist_date BETWEEN $1 AND $2
+     ORDER BY s.ist_date, s.slot, s.captured_at DESC`,
     [from, to],
   );
 }
@@ -555,24 +575,38 @@ export interface SlotPoint extends SlotActivity {
   forks_at: number | null;
   open_issues_at: number | null;
   open_prs_at: number | null;
-  /** Net change across the window from consecutive snapshots (null if either is missing). */
+  /**
+   * Net change across the window: from its start reading to the next window's, or, while
+   * that one is missing, to the latest reading inside the window. Null without a start
+   * reading or without any later one.
+   */
   net_stars: number | null;
   net_forks: number | null;
+  /** True when the net change only runs to a reading inside the window, e.g. one still open. */
+  net_partial: boolean;
+  /** When the reading the net change runs to was taken. */
+  net_until: string | null;
   captured_at: string | null;
 }
 
 export async function slotSeries(from: string, to: string): Promise<SlotPoint[]> {
-  const [activity, snaps, starEvents] = await Promise.all([
+  const [activity, starts, lasts, starEvents] = await Promise.all([
     slotActivity(from, to),
     slotSnapshots(from, addDays(to, 1)),
+    slotLastSnapshots(from, to),
     hasStarEvents(),
   ]);
-  const byKey = new Map(snaps.map((s) => [`${s.date}:${s.slot}`, s]));
+  const startByKey = new Map(starts.map((s) => [`${s.date}:${s.slot}`, s]));
+  const lastByKey = new Map(lasts.map((s) => [`${s.date}:${s.slot}`, s]));
   const nextKey = (date: string, slot: Slot) => (slot === 18 ? `${addDays(date, 1)}:0` : `${date}:${slot + 6}`);
   return activity.map((a) => {
-    const here = byKey.get(`${a.date}:${a.slot}`);
-    const next = byKey.get(nextKey(a.date, a.slot));
-    const net_stars = here && next ? next.stars - here.stars : null;
+    const key = `${a.date}:${a.slot}`;
+    const here = startByKey.get(key);
+    const next = startByKey.get(nextKey(a.date, a.slot));
+    const last = lastByKey.get(key);
+    // The window's end reading: the next window's start, or until that exists the latest reading in this one.
+    const end = next ?? (here && last && last.captured_at.getTime() > here.captured_at.getTime() ? last : undefined);
+    const net_stars = here && end ? end.stars - here.stars : null;
     const point: SlotPoint = {
       ...a,
       stars_at: here?.stars ?? null,
@@ -580,7 +614,9 @@ export async function slotSeries(from: string, to: string): Promise<SlotPoint[]>
       open_issues_at: here?.open_issues ?? null,
       open_prs_at: here?.open_prs ?? null,
       net_stars,
-      net_forks: here && next ? next.forks - here.forks : null,
+      net_forks: here && end ? end.forks - here.forks : null,
+      net_partial: end !== undefined && next === undefined,
+      net_until: end ? end.captured_at.toISOString() : null,
       captured_at: here ? here.captured_at.toISOString() : null,
     };
     if (!starEvents && net_stars !== null) {

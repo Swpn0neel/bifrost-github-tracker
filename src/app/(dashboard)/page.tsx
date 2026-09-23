@@ -200,7 +200,7 @@ export default async function OverviewPage() {
             </div>
           </div>
           <p className="mt-4 text-xs text-pretty text-muted-foreground">
-            Latest snapshot: {latest ? formatIstDateTime(latest.captured_at) : "none yet"}. Daily values use the scheduled midnight IST reading; Refresh only updates the live numbers.
+            Latest snapshot: {latest ? formatIstDateTime(latest.captured_at) : "none yet"}. Past days use their midnight IST reading; today follows the latest reading, so Refresh updates it too.
           </p>
         </Card>
         <Card title="This week vs last week" subtitle="Rolling 7-day windows ending today (IST)">

@@ -21,7 +21,7 @@ export function RefreshButton() {
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       const warningCount = (json.detail?.syncErrors?.length ?? 0) + (json.detail?.compare?.errors?.length ?? 0);
       const warnings = warningCount ? ` · ${warningCount} warning(s)` : "";
-      toast.success("Live numbers updated", { description: `${json.apiCalls ?? "?"} API calls${warnings}` });
+      toast.success("New reading taken", { description: `${json.apiCalls ?? "?"} API calls${warnings}` });
       setState("done");
       router.refresh();
     } catch (err) {
@@ -33,7 +33,7 @@ export function RefreshButton() {
   return (
     <Hint
       side="bottom"
-      text="Fetch the latest numbers now. Daily and 6-hour window figures only use the scheduled runs at 12 AM, 6 AM, 12 PM and 6 PM IST."
+      text="Take a new reading now. Today and the open 6-hour window follow the latest reading; past days keep their midnight (12 AM IST) readings."
     >
       <Button type="button" variant="outline" size="sm" onClick={run} disabled={state === "running"}>
         <RefreshCw className={state === "running" ? "animate-spin" : undefined} aria-hidden />

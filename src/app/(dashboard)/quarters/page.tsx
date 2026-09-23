@@ -90,14 +90,20 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
           if (!p) return "—";
           const net = m.netKey ? (p[m.netKey] as number | null) : null;
           const at = m.atKey ? (p[m.atKey] as number | null) : null;
+          const untilNote = net !== null && p.net_partial && p.net_until ? ` · net change up to ${formatIstDateTime(p.net_until)}` : "";
           const title = p.captured_at
-            ? `Scheduled snapshot ${formatIstDateTime(p.captured_at)}${at !== null ? ` · ${formatInt(at)} at window start` : ""}`
-            : "No scheduled snapshot in this window";
+            ? `Reading ${formatIstDateTime(p.captured_at)}${at !== null ? ` · ${formatInt(at)} at window start` : ""}${untilNote}`
+            : "No reading in the first hour of this window";
           return (
             <Hint text={title}>
               <span>
                 {formatInt(value(p))}
-                {net !== null && <span className="ml-1 text-muted-foreground">[{signed(net)}]</span>}
+                {net !== null && (
+                  <span className="ml-1 text-muted-foreground">
+                    [{signed(net)}
+                    {p.net_partial ? " so far" : ""}]
+                  </span>
+                )}
               </span>
             </Hint>
           );
@@ -113,8 +119,9 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
         title="Quarters"
         description={
           <>
-            Each day split into the four collector windows (IST). Bars count events with a timestamp inside the window; the net change between
-            consecutive scheduled snapshots is in the table (manual refreshes are not counted).
+            Each day split into the four collector windows (IST). Bars count events with a timestamp inside the window. The brackets in the table are
+            the net change between the readings at the start of consecutive windows; a window with no following reading yet shows the change up to its
+            latest reading (so far), which a refresh updates.
             {starsFromSnapshots && ` For stars, gains are the net change between snapshots: ${STAR_NOTE_SHORT}.`}
           </>
         }
@@ -163,7 +170,7 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
           />
           <p className="mt-3 text-xs text-pretty text-muted-foreground">Column labels are window start times; 6 PM covers 6 PM – midnight (US working hours).</p>
         </Card>
-        <Card title="Recent days" subtitle="Gross events per window; net change from snapshots in brackets where both readings exist">
+        <Card title="Recent days" subtitle="Gross events per window; net change between readings in brackets (so far: the window has no following reading yet)">
           <DataTable rows={tableRows} rowKey={([date]) => date} dense columns={tableColumns} />
         </Card>
       </div>

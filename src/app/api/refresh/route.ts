@@ -8,7 +8,9 @@ export const maxDuration = 300;
 
 /**
  * Manual snapshot: the dashboard's Refresh button (cookie) or an external caller (bearer COLLECT_SECRET).
- * It refreshes the live numbers only; days and 6-hour windows use the scheduled cron runs (see SCHEDULED in queries.ts).
+ * The reading counts like a scheduled one (see ON_TIME in queries.ts): today's close and the open 6-hour
+ * window follow it, and it stands in for a missed run when taken in a window's first hour. Only a compared
+ * repo's initial event load stays with the cron runs, since it can outlast this route's time limit.
  */
 export async function POST(req: NextRequest) {
   const authorized =

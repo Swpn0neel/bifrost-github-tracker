@@ -119,8 +119,8 @@ export function runSnapshotJob(triggeredBy: Trigger): Promise<JobResult> {
     const sync = await runSync(gh, log, { repo: snap.repo, full: false, fullStars });
     // Compared repos' events come after the primary's, so a long backfill never delays Bifrost's own numbers.
     const compareSync = await syncTrackedRepos(gh, log, compare.snapshotted, { allowBackfill: triggeredBy === "cron" });
-    // Outside history is fetched on the schedule only: the day a repo was added has ended by the next morning's run.
-    const trendshift = triggeredBy === "cron" ? await fillTrendshiftHistory(log) : { imported: [], errors: [] };
+    // Outside history for a repo that still needs it: one page fetch each, and only while the import is due.
+    const trendshift = await fillTrendshiftHistory(log);
     const compareDetail = { ...compare, events: compareSync, trendshift, errors: [...compare.errors, ...compareSync.errors, ...trendshift.errors] };
     return {
       status: sync.errors.length || compareDetail.errors.length ? "partial" : "ok",

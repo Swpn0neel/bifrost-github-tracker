@@ -272,7 +272,7 @@ export function trendshiftImportDue(firstReadingDay: string | null, lastImported
   return since >= 1 && since <= TRENDSHIFT_FILL_DAYS ? "fill" : null;
 }
 
-/** How many days after a repo's first reading the scheduled runs keep trying to fetch that day from Trendshift. */
+/** How many days after a repo's first reading the collector runs keep trying to fetch that day from Trendshift. */
 export const TRENDSHIFT_FILL_DAYS = 3;
 
 export interface TrendshiftFillResult {

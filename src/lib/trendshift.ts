@@ -48,6 +48,9 @@ export function parseTrendshiftInput(input: string): number | null {
 
 export const trendshiftUrl = (id: number) => `https://trendshift.io/repositories/${id}`;
 
+/** A dashboard refresh may fetch the page; a slow source must not hold that request for long. */
+const FETCH_TIMEOUT_MS = 20_000;
+
 interface PageDay {
   full_name: string;
   date: string;
@@ -96,7 +99,7 @@ const pick = (g: PageDay | PageMonth): TrendshiftGain => ({ stars: g.stars, fork
 /** Fetch the repository page once and read the activity out of it. With `expectedRepo`, a page for another repository is refused. */
 export async function fetchTrendshift(id: number, expectedRepo?: string): Promise<TrendshiftCapture> {
   const url = trendshiftUrl(id);
-  const res = await fetch(url, { headers: { "User-Agent": "bifrost-github-tracker (one-time history import)" } });
+  const res = await fetch(url, { headers: { "User-Agent": "bifrost-github-tracker (one-time history import)" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   const html = await res.text();
   const arrays = embeddedArrays(html, "activities");
