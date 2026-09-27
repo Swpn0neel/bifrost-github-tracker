@@ -17,6 +17,8 @@ export function RefreshButton() {
     setState("running");
     try {
       const res = await fetch("/api/refresh", { method: "POST" });
+      // The hub session ended or access was withdrawn: reload, and the proxy sends the page to the hub.
+      if (res.status === 401 || res.status === 403) return window.location.reload();
       const json = (await res.json()) as { status?: string; apiCalls?: number; error?: string; detail?: { syncErrors?: string[]; compare?: { errors?: string[] } } };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       const warningCount = (json.detail?.syncErrors?.length ?? 0) + (json.detail?.compare?.errors?.length ?? 0);
