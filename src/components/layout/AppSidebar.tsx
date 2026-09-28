@@ -19,9 +19,12 @@ interface AppSidebarProps {
   updated: string;
   updatedTitle: string;
   next: string;
+  email: string | null;
+  /** The hub's sign-out page; signing out ends the session for every dashboard. */
+  signOutUrl: string;
 }
 
-export function AppSidebar({ repo, updated, updatedTitle, next }: AppSidebarProps) {
+export function AppSidebar({ repo, updated, updatedTitle, next, email, signOutUrl }: AppSidebarProps) {
   return (
     <Sidebar variant="inset" collapsible="icon">
       {/* The outer box is cut off by the moving sidebar edge; the inner one keeps the expanded width in both
@@ -48,12 +51,16 @@ export function AppSidebar({ repo, updated, updatedTitle, next }: AppSidebarProp
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
-                <form action="/api/logout" method="post">
-                  <SidebarMenuButton type="submit" tooltip="Log out">
+                <SidebarMenuButton asChild tooltip={email ? `Sign out ${email}` : "Sign out"}>
+                  {/* _top leaves the hub's iframe when the dashboard is shown inside it. */}
+                  <a href={signOutUrl} target="_top">
                     <LogOut />
-                    <span className="sidebar-fade">Log out</span>
-                  </SidebarMenuButton>
-                </form>
+                    <span className="sidebar-fade">
+                      Sign out
+                      {email && <span className="text-muted-foreground"> · {email}</span>}
+                    </span>
+                  </a>
+                </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>

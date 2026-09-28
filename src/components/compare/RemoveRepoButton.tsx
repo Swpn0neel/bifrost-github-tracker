@@ -38,6 +38,8 @@ export function RemoveRepoButton({ id, fullName, afterRemove, compact = false }:
     setBusy(true);
     try {
       const res = await fetch(`/api/repos/${id}`, { method: "DELETE" });
+      // The hub session ended or access was withdrawn: reload, and the proxy sends the page to the hub.
+      if (res.status === 401 || res.status === 403) return window.location.reload();
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       toast.success(`Removed ${fullName}`, { description: "Its readings are kept; add it again to bring the history back." });

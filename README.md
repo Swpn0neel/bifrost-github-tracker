@@ -25,7 +25,7 @@ Internal dashboard that snapshots `maximhq/bifrost` on GitHub four times a day (
 Requires Node 20+ (installed via nvm) and a Neon database.
 
 ```bash
-cp .env.example .env.local   # fill in DATABASE_URL, GITHUB_TOKEN, DASHBOARD_PASSWORD, SESSION_SECRET, COLLECT_SECRET
+cp .env.example .env.local   # fill in DATABASE_URL, GITHUB_TOKEN, COLLECT_SECRET; add HUB_SSO_DISABLED=true (see Sign-in)
 npm install
 npm run db:migrate           # applies db/schema.sql (idempotent)
 npm run backfill             # one-time history load of the primary repo; needs GITHUB_TOKEN (~5 min, a few hundred API calls)
@@ -61,9 +61,22 @@ Stars are the exception for every repository, Bifrost included: GitHub hides the
 
 The event tables carry a `repo` column; rows without one belong to Bifrost. The dashboard's own pages only ever read Bifrost's rows. Removing a repository only hides it (`tracked_repos.removed_at`, after typing its name to confirm); its readings and events stay, and adding it again brings the history back. The page needs `GITHUB_TOKEN` (GraphQL).
 
+## Sign-in
+
+Sign-in happens on the GTM Hub (https://hub.agitracker.io); the dashboard has no password of its own. The hub's session cookie is shared across `*.agitracker.io`, and `src/proxy.ts` asks the hub (`GET {HUB_URL}/api/sso/verify?app=github-tracker`) whether the visitor may use this dashboard, caching a yes for 60 seconds. Not signed in: pages redirect to the hub's login and come back; no access: to the hub's no-access page; `/api/*` answers 401/403 JSON instead. If the hub cannot be reached the dashboard fails closed with a 503. **Sign out** in the sidebar goes to the hub's sign-out page. `/api/health` stays public, and `/api/refresh` with the bearer `COLLECT_SECRET` skips the hub.
+
+| Variable | Default | |
+|---|---|---|
+| `HUB_URL` | `https://hub.agitracker.io` | the hub |
+| `APP_PUBLIC_URL` | `https://github.agitracker.io` | this dashboard's public URL, used for the return link after login |
+| `HUB_APP_SLUG` | `github-tracker` | this dashboard's id in the hub |
+| `HUB_SSO_DISABLED` | off | `true` skips the hub and treats every request as `dev@localhost` (admin); local development only, logs a warning at startup |
+
+`DASHBOARD_PASSWORD` and `SESSION_SECRET` are no longer used and can be deleted.
+
 ## Railway deployment
 
-Live at https://bifrost-gh-tracker.up.railway.app (project `bifrost-github-tracker`). Two services from the same repo share one Neon database:
+Live at https://github.agitracker.io (project `bifrost-github-tracker`; the Railway domain https://bifrost-gh-tracker.up.railway.app cannot sign in, since the hub cookie only reaches `*.agitracker.io`). Two services from the same repo share one Neon database:
 
 | Service | Settings | What it does |
 |---|---|---|
@@ -72,16 +85,16 @@ Live at https://bifrost-gh-tracker.up.railway.app (project `bifrost-github-track
 
 Railway's config-as-code files are deprecated, so the collector's start command and cron schedule live in the service settings UI rather than a JSON file.
 
-Variables: `web` holds `DATABASE_URL`, `GITHUB_TOKEN`, `GITHUB_REPO`, `DASHBOARD_PASSWORD`, `SESSION_SECRET`, `COLLECT_SECRET`. `collector` references them (`DATABASE_URL=${{web.DATABASE_URL}}` etc.) so secrets are entered once.
+Variables: `web` holds `DATABASE_URL`, `GITHUB_TOKEN`, `GITHUB_REPO`, `COLLECT_SECRET` (plus the optional sign-in ones above). `collector` references them (`DATABASE_URL=${{web.DATABASE_URL}}` etc.) so secrets are entered once; it needs nothing for sign-in.
 
 To reproduce from scratch:
 
 1. New project → GitHub repository → this repo (the Railway GitHub App must have access to it). Rename the service `web`, paste the variables into its Raw Editor, generate a domain.
 2. Add a second service from the same repo, name it `collector`, set the start command and cron schedule above, and add the three `${{web.*}}` references.
-3. Deploy. Open the domain, sign in with `DASHBOARD_PASSWORD`, press **Refresh now** for the first snapshot.
+3. Deploy. Open the domain, sign in on the GTM Hub (an admin there must give you this dashboard), press **Refresh now** for the first snapshot.
 4. Run the history backfill once (`npm run backfill` locally with `GITHUB_TOKEN` set, or from the collector's Railway shell).
 
-`POST /api/refresh` with `Authorization: Bearer $COLLECT_SECRET` triggers a snapshot from anywhere. (It is not called `/api/collect` because EasyPrivacy, on by default in uBlock Origin, Brave and AdGuard, blocks fetches to any URL ending in `/api/collect`, which made the button fail with "Failed to fetch".)
+`POST /api/refresh` with `Authorization: Bearer $COLLECT_SECRET` triggers a snapshot from anywhere, even while the hub is down. (It is not called `/api/collect` because EasyPrivacy, on by default in uBlock Origin, Brave and AdGuard, blocks fetches to any URL ending in `/api/collect`, which made the button fail with "Failed to fetch".)
 
 ## Layout
 
@@ -93,8 +106,8 @@ src/lib/github.ts        REST/GraphQL client with pagination, rate-limit backoff
 src/lib/queries.ts       all dashboard SQL, IST bucketing, snapshot/reconstruction merge
 src/lib/compare.ts       compared repositories: tracked_repos, repo_snapshots, the shared per-day shape
 src/lib/time.ts          IST helpers and the four windows
-src/app/(dashboard)/     pages (compare/ holds the comparison and the per-repository page); src/app/api/ login, logout, refresh, repos, health
+src/app/(dashboard)/     pages (compare/ holds the comparison and the per-repository page); src/app/api/ refresh, repos, health
 src/components/          charts (Recharts), tiles, tables, filters; layout/ is the sidebar shell
 src/components/ui/       shadcn/ui primitives (add more with npx shadcn@latest add <name>)
-src/proxy.ts             password gate (signed cookie)
+src/proxy.ts             sign-in gate (asks the GTM Hub, see src/lib/auth.ts)
 ```

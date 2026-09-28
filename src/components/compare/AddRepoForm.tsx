@@ -34,6 +34,8 @@ export function AddRepoForm() {
     setBusy(true);
     try {
       const res = await fetch("/api/repos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo, trendshift: trendshift.trim() }) });
+      // The hub session ended or access was withdrawn: reload, and the proxy sends the page to the hub.
+      if (res.status === 401 || res.status === 403) return window.location.reload();
       const json = (await res.json()) as AddResponse;
       if (!res.ok || !json.repo) throw new Error(json.error ?? `HTTP ${res.status}`);
       const stars = json.counts ? `${formatInt(json.counts.stars)} stars right now.` : "";

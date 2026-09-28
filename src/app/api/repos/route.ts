@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Add a repository to the Compare page (session cookie; the proxy rejects anything else). It gets
+ * Add a repository to the Compare page (hub session; the proxy rejects anything else). It gets
  * its first reading right away, and its outside history too when a Trendshift link comes with it.
  */
 export async function POST(req: NextRequest) {
