@@ -533,7 +533,7 @@ export async function dailySeries(from: string, to: string, repo: string = env.r
 }
 
 // ---------------------------------------------------------------------------
-// Slot ("quarter of day") series
+// Slot (6-hour window of the day) series
 // ---------------------------------------------------------------------------
 
 export interface SlotSnapshot {

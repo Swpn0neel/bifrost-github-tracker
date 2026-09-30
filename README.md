@@ -2,12 +2,14 @@
 
 Internal dashboard that snapshots `maximhq/bifrost` on GitHub four times a day (12 AM, 6 AM, 12 PM, 6 PM IST), stores everything in Neon Postgres, and shows the numbers by day and by 6-hour window.
 
+Pages, in sidebar order (`/quarters`, `/daily` and `/activity` redirect to their new addresses):
+
 - **Overview** – stars hero, today's deltas, 30-day trend, pace to the next milestone, this week vs last week.
-- **Daily** – one value per IST day for stars, forks, issues, PRs, commits, contributors; any date range; table view.
-- **Quarters** – the four daily windows: stacked per day, weekday × window heatmap, net change between snapshots.
-- **Issues & PRs** – opened vs closed, backlog, median time to close/merge, merge rate, age buckets, labels, oldest and most-discussed.
-- **Activity** – commits, new contributors, releases, top contributors.
+- **Time of day** (`/time-of-day`) – the four 6-hour windows: stacked per day (per week past three months, per month past two years), weekday × window heatmap, net change between snapshots.
 - **Compare** – other repositories (competitors) read at the same four times a day, side by side with Bifrost: a leaderboard with today / 7 d / 30 d star gains, daily and monthly comparison charts with a metric switch and one line per repository (per period, 7-day average or cumulative; as counts or, for stars and forks, as a percentage of each repository's own total, so an 8k repository and a 60k one compare on growth rate), and a page per repository. Add or remove repositories on the page itself.
+- **Daily history** (`/history`) – one value per IST day for stars, forks, issues, PRs, commits, contributors; any date range; table view.
+- **Issues & PRs** – opened vs closed, backlog, median time to close/merge, merge rate, age buckets, labels, oldest and most-discussed.
+- **Commits & releases** (`/commits`) – commits, new contributors, releases, top contributors.
 - **Status** – collector runs, next scheduled run, table counts, sync cursors.
 
 ## How the numbers are defined
@@ -15,7 +17,7 @@ Internal dashboard that snapshots `maximhq/bifrost` on GitHub four times a day (
 - **Snapshot**: the collector's reading of the headline counts (stars, forks, watchers, open/closed issues, open/merged/closed PRs, contributors, commits on the default branch, releases, discussions). One row per run.
 - **Reading**: every snapshot counts by when it was taken, not by what triggered it. The cron collector (`npm run collect`) takes one at the start of each window; the dashboard's **Refresh now** button (`POST /api/refresh`, or a Railway "Run now") stores the same kind of snapshot and syncs events. An **on-time** reading is one taken within the first hour of its window: it is the window's start reading, whether the scheduled run took it or a refresh stood in for a missed one. Refresh is refused while another run is still in progress.
 - **Daily value**: the reading at the following midnight (the next day's 12 AM run, or a refresh in that first hour when the run is missing). Until that exists, the day's latest reading of any kind, so today's figures follow a refresh; once the midnight reading is in, the day is settled and later refreshes do not move it.
-- **Quarter / window**: `12 AM–6 AM`, `6 AM–12 PM`, `12 PM–6 PM`, `6 PM–12 AM` IST. Gross activity in a window counts events (stars, forks, issues, PRs, commits) whose GitHub timestamp falls inside it. Net change is the difference between the on-time readings at the start of the window and of the next one; while the next one is missing (the window is still open, or its run failed) it runs to the latest reading inside the window and is marked "so far". A window with no on-time reading shows no net change.
+- **Window** (6-hour window, the *Time of day* page): `12 AM–6 AM`, `6 AM–12 PM`, `12 PM–6 PM`, `6 PM–12 AM` IST. Gross activity in a window counts events (stars, forks, issues, PRs, commits) whose GitHub timestamp falls inside it. Net change is the difference between the on-time readings at the start of the window and of the next one; while the next one is missing (the window is still open, or its run failed) it runs to the latest reading inside the window and is marked "so far". A window with no on-time reading shows no net change.
 - **Reconstructed history**: before the first snapshot, totals are rebuilt from event timestamps (`created_at`, `closed_at`, `merged_at`, …) and anchored to the first real snapshot.
 - **Stars are the exception.** GitHub only exposes a repository's stargazer list (with `starred_at`) to tokens that have collaborator access to that repository; every other token gets 404/403 on REST and an empty list on GraphQL. With a read-only account the collector detects this once (`sync_state.stargazers_unavailable`), skips the star sync, and the dashboard derives daily and per-window star gains from the net change between consecutive snapshots, labelled as such. Days before the first snapshot show no star total. If the token ever gains collaborator access, the existing code loads the full star list on its next run.
 - `open_issues_count` from GitHub includes PRs; this dashboard always separates them.

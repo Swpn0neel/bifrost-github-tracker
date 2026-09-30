@@ -10,6 +10,7 @@ import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { fixed, formatInt, pct, signed } from "@/lib/format";
 import { dataStartDate, hasStarEvents, slotSeries, slotWeekdayCounts, type HeatmapMetric, type SlotPoint } from "@/lib/queries";
 import { resolveRange, type SearchParams } from "@/lib/range";
+import { periodStart, type TrendGroup } from "@/lib/trends";
 import { addDays, formatDate, formatIstDateTime, SLOT_LABELS, SLOT_WINDOWS, SLOTS, WEEKDAY_LABELS, weekday, type Slot } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
@@ -26,12 +27,17 @@ const ORD = ["var(--ord-1)", "var(--ord-2)", "var(--ord-3)", "var(--ord-4)"];
 const STAR_NOTE_SHORT = "GitHub does not expose the stargazer list to this token";
 const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 
+/** One bar per day up to about three months, then per week, then per month: a year of daily bars would be under a pixel wide. */
+function chartPeriod(days: number): TrendGroup {
+  return days <= 92 ? "day" : days <= 730 ? "week" : "month";
+}
+
 function pickMetric(v: string | string[] | undefined): HeatmapMetric {
   const s = Array.isArray(v) ? v[0] : v;
   return s && s in METRICS ? (s as HeatmapMetric) : "stars";
 }
 
-export default async function QuartersPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function TimeOfDayPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const metric = pickMetric(sp.metric);
   const m = METRICS[metric];
@@ -42,18 +48,24 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
 
   const value = (p: SlotPoint) => Number(p[m.key] ?? 0);
 
-  // Per-day rows with one column per window, for the stacked chart and the table.
+  // Per-day points grouped by date, for the table.
   const byDate = new Map<string, SlotPoint[]>();
   for (const p of points) {
     const list = byDate.get(p.date) ?? [];
     list.push(p);
     byDate.set(p.date, list);
   }
-  const chartRows = [...byDate.entries()].map(([date, list]) => {
-    const row: Record<string, string | number | null> = { date };
-    for (const p of list) row[`s${p.slot}`] = value(p);
-    return row;
-  });
+  // Chart rows with one column per window, summed per period; a period cut by the range starts at the range.
+  const period = chartPeriod(range.days);
+  const byPeriod = new Map<string, Record<string, string | number>>();
+  for (const p of points) {
+    const start = periodStart(p.date, period);
+    const key = start < range.from ? range.from : start;
+    const row = byPeriod.get(key) ?? { date: key };
+    row[`s${p.slot}`] = Number(row[`s${p.slot}`] ?? 0) + value(p);
+    byPeriod.set(key, row);
+  }
+  const chartRows = [...byPeriod.values()];
 
   const slotTotals = SLOTS.map((slot) => points.filter((p) => p.slot === slot).reduce((acc, p) => acc + value(p), 0));
   const grandTotal = slotTotals.reduce((a, b) => a + b, 0);
@@ -116,10 +128,10 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Quarters"
+        title="Time of day"
         description={
           <>
-            Each day split into the four collector windows (IST). Bars count events with a timestamp inside the window. The brackets in the table are
+            When activity happens: each day split into four 6-hour windows (IST), the same times the collector takes its readings. Bars count events with a timestamp inside the window. The brackets in the table are
             the net change between the readings at the start of consecutive windows; a window with no following reading yet shows the change up to its
             latest reading (so far), which a refresh updates.
             {starsFromSnapshots && ` For stars, gains are the net change between snapshots: ${STAR_NOTE_SHORT}.`}
@@ -133,10 +145,10 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
           items={(Object.keys(METRICS) as HeatmapMetric[]).map((k) => ({
             key: k,
             label: METRICS[k].label,
-            href: `/quarters?metric=${k}&${range.key === "custom" ? `from=${range.from}&to=${range.to}` : `range=${range.key}`}`,
+            href: `/time-of-day?metric=${k}&${range.key === "custom" ? `from=${range.from}&to=${range.to}` : `range=${range.key}`}`,
           }))}
         />
-        <RangeFilter range={range} basePath="/quarters" extra={{ metric }} />
+        <RangeFilter range={range} basePath="/time-of-day" extra={{ metric }} />
       </div>
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
@@ -151,9 +163,17 @@ export default async function QuartersPage({ searchParams }: { searchParams: Pro
         ))}
       </div>
 
-      <Card title={`${m.label} by window`} subtitle="Stacked per day; lighter is earlier in the day">
+      <Card
+        title={`${m.label} by window`}
+        subtitle={
+          period === "day"
+            ? "Stacked per day; lighter is earlier in the day"
+            : `Stacked per ${period} (the first and last can be partial); lighter is earlier in the day`
+        }
+      >
         <TimeSeriesChart
           data={chartRows}
+          period={period}
           height={280}
           series={SLOTS.map((slot, i) => ({ key: `s${slot}`, label: SLOT_WINDOWS[slot], color: ORD[i], type: "bar" as const, stackId: "day" }))}
         />

@@ -16,7 +16,7 @@ import { formatDate } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
-export default async function DailyPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function HistoryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const dataStart = await dataStartDate();
   const range = resolveRange(sp, dataStart, "30d");
@@ -56,7 +56,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Daily"
+        title="Daily history"
         description={
           <>
             One value per IST calendar day. Totals are the last reading before midnight; gains are events with a timestamp inside the day.
@@ -65,7 +65,7 @@ export default async function DailyPage({ searchParams }: { searchParams: Promis
           </>
         }
       />
-      <RangeFilter range={range} basePath="/daily" />
+      <RangeFilter range={range} basePath="/history" />
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 2xl:grid-cols-6">
         <StatTile icon={<Star />} label={starEvents ? "New stars" : "Net new stars"} value={totals.stars} hint={totals.unstars ? `${formatInt(totals.unstars)} ${starEvents ? "unstarred" : "lost"}` : starEvents ? undefined : estimatedStarDays > 0 ? "Snapshot deltas, plus Trendshift estimates" : "From snapshot deltas"} />

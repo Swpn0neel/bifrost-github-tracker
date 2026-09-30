@@ -5,7 +5,7 @@ import { Area, Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from "rec
 import { ChartContainer, ChartTooltip, type ChartConfig } from "@/components/ui/chart";
 import { CHART_RESIZE_SETTLE_MS, STRETCH_WHILE_RESIZING } from "./chart-resize";
 import { compact, formatInt } from "@/lib/format";
-import { formatDateWithDay, formatShortDate } from "@/lib/time";
+import { formatDate, formatDateWithDay, formatMonth, formatShortDate } from "@/lib/time";
 
 export interface ChartSeries {
   key: string;
@@ -36,6 +36,8 @@ interface TimeSeriesChartProps {
   legend?: boolean;
   /** The last row is a period still in progress: lines reach it with a dashed segment. */
   partialLast?: boolean;
+  /** Rows are weeks or months keyed by their first day, not days: ticks and tooltip headings say so. */
+  period?: "day" | "week" | "month";
 }
 
 // A line's in-progress tail is plotted as a second, dashed line under this key.
@@ -95,13 +97,19 @@ export function TimeSeriesChart({
   decimals = false,
   legend = true,
   partialLast = false,
+  period = "day",
 }: TimeSeriesChartProps) {
+  const monthLabel = (v: string) => formatMonth(v.slice(0, 7));
+  const tickLabel = period === "month" ? monthLabel : formatX;
+  const heading = period === "week" ? (v: string) => `Week of ${formatDate(v)}` : period === "month" ? monthLabel : formatXLong;
   const gradientPrefix = `area-${useId().replace(/:/g, "")}`;
   const hasBars = series.some((s) => s.type === "bar");
   const lastInStack = new Map<string, string>();
   for (const s of series) if (s.stackId) lastInStack.set(s.stackId, s.key);
   const domain: [number | string, number | string] = zeroBased ? [0, "auto"] : ["auto", "auto"];
   const roundedEnd: [number, number, number, number] = [4, 4, 0, 0];
+  // The 1px surface gap between stacked segments would cover bars only a pixel or two wide.
+  const stackGap = data.length <= 120;
 
   // Split each line at the second-to-last row: solid up to it, dashed from it to the last one.
   const lineKeys = series.filter((s) => (s.type ?? "line") === "line").map((s) => s.key);
@@ -140,7 +148,7 @@ export function TimeSeriesChart({
           <CartesianGrid vertical={false} stroke="var(--grid)" strokeWidth={1} />
           <XAxis
             dataKey={xKey}
-            tickFormatter={(v) => formatX(String(v))}
+            tickFormatter={(v) => tickLabel(String(v))}
             tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
             axisLine={{ stroke: "var(--axis)" }}
             tickLine={false}
@@ -159,7 +167,7 @@ export function TimeSeriesChart({
           />
           <ChartTooltip
             cursor={hasBars ? { fill: "var(--muted)", fillOpacity: 0.7 } : { stroke: "var(--axis)", strokeWidth: 1 }}
-            content={<ChartTooltipBody series={series} formatXLong={formatXLong} formatValue={formatValue} />}
+            content={<ChartTooltipBody series={series} formatXLong={heading} formatValue={formatValue} />}
             isAnimationActive={false}
           />
           {series.map((s) => {
@@ -175,8 +183,8 @@ export function TimeSeriesChart({
                   stackId={s.stackId}
                   maxBarSize={24}
                   radius={rounded ? roundedEnd : 0}
-                  stroke={s.stackId ? "var(--card)" : undefined}
-                  strokeWidth={s.stackId ? 1 : 0}
+                  stroke={s.stackId && stackGap ? "var(--card)" : undefined}
+                  strokeWidth={s.stackId && stackGap ? 1 : 0}
                   isAnimationActive={false}
                 />
               );

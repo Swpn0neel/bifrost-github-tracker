@@ -16,7 +16,7 @@ import { formatIstDateTime } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
-export default async function ActivityPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+export default async function CommitsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const dataStart = await dataStartDate();
   const range = resolveRange(sp, dataStart, "90d");
@@ -34,8 +34,8 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Activity" description="Commits on the default branch, contributor growth and release cadence." />
-      <RangeFilter range={range} basePath="/activity" />
+      <PageHeader title="Commits & releases" description="Commits on the default branch, contributor growth and release cadence." />
+      <RangeFilter range={range} basePath="/commits" />
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatTile icon={<GitCommitHorizontal />} label="Commits in range" value={commits} hint={`${fixed(commits / range.days)} per day`} />
