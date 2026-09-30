@@ -3,7 +3,7 @@ import { fetchRepo, parseRepoInput, RepoNotFoundError, storeRepoSnapshot } from 
 import { upsertTrackedRepo } from "@/lib/compare";
 import { env } from "@/lib/env";
 import { GitHubClient } from "@/lib/github";
-import { fetchTrendshift, importCapture, parseTrendshiftInput, TrendshiftMismatch, type TrendshiftCapture } from "@/lib/trendshift";
+import { fetchTrendshift, importCapture, linkTrendshift, parseTrendshiftInput, TrendshiftMismatch, TrendshiftNotFound, type TrendshiftCapture } from "@/lib/trendshift";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -43,13 +43,18 @@ export async function POST(req: NextRequest) {
         if (err instanceof TrendshiftMismatch) {
           return NextResponse.json({ error: `That Trendshift page is for ${err.pageRepo}, not ${facts.full_name}. Nothing was added.` }, { status: 400 });
         }
-        historyWarning = `Trendshift could not be read (${err instanceof Error ? err.message : String(err)}); the repository was added without its history.`;
+        if (err instanceof TrendshiftNotFound) {
+          return NextResponse.json({ error: `There is no Trendshift page at ${err.url}. Nothing was added.` }, { status: 400 });
+        }
+        historyWarning = `Trendshift could not be read (${err instanceof Error ? err.message : String(err)}); the repository was added without its history for now, and each collector run will try again.`;
         log(historyWarning);
       }
     }
     const { repo, created } = await upsertTrackedRepo(facts.full_name);
     const snapshot = await storeRepoSnapshot(repo.id, facts, counts, "manual");
     const history = capture ? await importCapture(capture) : null;
+    // A page that could not be read is still remembered, so the collector retries it (and checks it is the right repository then).
+    if (!capture && trendshiftId !== null) await linkTrendshift(facts.full_name, trendshiftId);
     return NextResponse.json({
       repo: { id: repo.id, full_name: facts.full_name },
       created,

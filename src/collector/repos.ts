@@ -6,7 +6,7 @@ import { GitHubClient, GitHubError } from "../lib/github";
 import { query, queryOne } from "../lib/db";
 import { getState, runSync, setState, type Log } from "./sync";
 import { daysBetween, istDate, istSlot } from "../lib/time";
-import { fetchTrendshift, importCapture } from "../lib/trendshift";
+import { fetchTrendshift, importCapture, linkTrendshift, TrendshiftMismatch, TrendshiftNotFound } from "../lib/trendshift";
 
 export interface RepoFacts {
   github_id: number | null;
@@ -302,6 +302,11 @@ export async function fillTrendshiftHistory(log: Log): Promise<TrendshiftFillRes
       const message = err instanceof Error ? err.message : String(err);
       result.errors.push(`${repo.full_name} trendshift: ${message}`);
       log(`compare ${repo.full_name} Trendshift import FAILED: ${message}`);
+      // A link stored while its page could not be read is only checked here; a wrong one is dropped rather than retried every run.
+      if (due === "initial" && (err instanceof TrendshiftMismatch || err instanceof TrendshiftNotFound)) {
+        await linkTrendshift(repo.full_name, null);
+        log(`compare ${repo.full_name}: dropped Trendshift link #${repo.trendshift_id}`);
+      }
     }
   }
   return result;

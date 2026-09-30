@@ -34,6 +34,13 @@ export class TrendshiftMismatch extends Error {
   }
 }
 
+export class TrendshiftNotFound extends Error {
+  constructor(readonly url: string) {
+    super(`${url}: no such Trendshift page`);
+    this.name = "TrendshiftNotFound";
+  }
+}
+
 const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 const isMonth = (s: string) => /^\d{4}-\d{2}$/.test(s);
 
@@ -52,7 +59,9 @@ export const trendshiftUrl = (id: number) => `https://trendshift.io/repositories
 const FETCH_TIMEOUT_MS = 20_000;
 
 interface PageDay {
-  full_name: string;
+  /** Older pages only; newer ones name the repository once, next to its id. */
+  full_name?: string;
+  repository_id?: number;
   date: string;
   stars: number;
   forks: number;
@@ -62,6 +71,7 @@ interface PageDay {
 }
 
 interface PageMonth {
+  repository_id?: number;
   year: number;
   month: number;
   stars: number;
@@ -94,19 +104,35 @@ function embeddedArrays(html: string, key: string): unknown[][] {
   return out;
 }
 
+/**
+ * The repository a page is about. Pages used to repeat full_name on every day; since late
+ * September 2026 they name it only as {"id":<id>,"name":"owner/name"} (and in the title).
+ */
+function pageRepo(html: string, id: number, daily: PageDay[]): string | null {
+  if (daily[0].full_name) return daily[0].full_name;
+  const named = html.match(new RegExp(`\\\\"id\\\\":${id},\\\\"name\\\\":\\\\"([\\w.-]+/[\\w.-]+)\\\\"`));
+  if (named) return named[1];
+  return html.match(/<title>([\w.-]+\/[\w.-]+) —/)?.[1] ?? null;
+}
+
 const pick = (g: PageDay | PageMonth): TrendshiftGain => ({ stars: g.stars, forks: g.forks, merged_prs: g.merged_prs, issues: g.issues, closed_issues: g.closed_issues });
 
 /** Fetch the repository page once and read the activity out of it. With `expectedRepo`, a page for another repository is refused. */
 export async function fetchTrendshift(id: number, expectedRepo?: string): Promise<TrendshiftCapture> {
   const url = trendshiftUrl(id);
   const res = await fetch(url, { headers: { "User-Agent": "bifrost-github-tracker (one-time history import)" }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (res.status === 404) throw new TrendshiftNotFound(url);
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
   const html = await res.text();
+  // An unknown id is answered with HTTP 200 and Next.js's not-found page.
+  if (html.includes("NEXT_HTTP_ERROR_FALLBACK;404")) throw new TrendshiftNotFound(url);
   const arrays = embeddedArrays(html, "activities");
-  const daily = arrays.find((a): a is PageDay[] => a.length > 0 && typeof (a[0] as PageDay).date === "string" && "stars" in (a[0] as object));
-  const monthly = arrays.find((a): a is PageMonth[] => a.length > 0 && typeof (a[0] as PageMonth).year === "number" && "stars" in (a[0] as object));
+  const ours = (a: unknown[]) => a.length > 0 && "stars" in (a[0] as object) && ((a[0] as PageDay).repository_id ?? id) === id;
+  const daily = arrays.find((a): a is PageDay[] => ours(a) && typeof (a[0] as PageDay).date === "string");
+  const monthly = arrays.find((a): a is PageMonth[] => ours(a) && typeof (a[0] as PageMonth).year === "number");
   if (!daily || !monthly) throw new Error(`${url}: could not find the daily and monthly activity in the page`);
-  const repo = daily[0].full_name;
+  const repo = pageRepo(html, id, daily);
+  if (!repo) throw new Error(`${url}: could not find which repository the page is for`);
   if (expectedRepo && repo.toLowerCase() !== expectedRepo.toLowerCase()) throw new TrendshiftMismatch(url, repo, expectedRepo);
 
   const daily_utc: Record<string, TrendshiftGain> = {};
@@ -166,9 +192,12 @@ export async function importCapture(capture: TrendshiftCapture): Promise<ImportS
       [capture.repo, capture.source_name, rows.map((r) => r[0]), rows.map((r) => r[1]), col("stars"), col("forks"), col("issues"), col("closed_issues"), col("merged_prs")],
     );
   }
-  if (capture.trendshift_id) {
-    await query("UPDATE tracked_repos SET trendshift_id = $2 WHERE lower(full_name) = lower($1)", [capture.repo, capture.trendshift_id]);
-  }
+  if (capture.trendshift_id) await linkTrendshift(capture.repo, capture.trendshift_id);
   const dayRows = rows.filter((r) => r[0] === "day");
   return { days: dayRows.length, months: rows.length - dayRows.length, lastDay: dayRows.length ? dayRows[dayRows.length - 1][1] : null };
+}
+
+/** Remember (or, with null, forget) the Trendshift page of a tracked repo; the collector imports from it while an import is due. */
+export async function linkTrendshift(repo: string, id: number | null): Promise<void> {
+  await query("UPDATE tracked_repos SET trendshift_id = $2 WHERE lower(full_name) = lower($1)", [repo, id]);
 }
