@@ -226,7 +226,8 @@ export interface TrackedRepoSyncResult {
 /**
  * Event history for the compared repos: an incremental sync for each one already loaded,
  * and one initial load per cron run for a repo that is not yet (loading a large repo takes
- * minutes, so manual refreshes leave it to the schedule).
+ * minutes, so manual refreshes leave it to the schedule; adding a repo also starts its load in
+ * the background).
  *
  * The initial load is the incremental sync too: with no cursor saved it walks each endpoint
  * from the beginning, and a step that failed last time (its cursor never saved) is simply

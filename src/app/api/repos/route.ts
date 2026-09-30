@@ -1,5 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { fetchRepo, parseRepoInput, RepoNotFoundError, storeRepoSnapshot } from "@/collector/repos";
+import { after, NextResponse, type NextRequest } from "next/server";
+import { runSyncJob } from "@/collector/jobs";
+import { backfilledKey, fetchRepo, parseRepoInput, RepoNotFoundError, storeRepoSnapshot } from "@/collector/repos";
+import { getState } from "@/collector/sync";
 import { upsertTrackedRepo } from "@/lib/compare";
 import { env } from "@/lib/env";
 import { GitHubClient } from "@/lib/github";
@@ -55,6 +57,15 @@ export async function POST(req: NextRequest) {
     const history = capture ? await importCapture(capture) : null;
     // A page that could not be read is still remembered, so the collector retries it (and checks it is the right repository then).
     if (!capture && trendshiftId !== null) await linkTrendshift(facts.full_name, trendshiftId);
+    // The full event history (forks, issues, PRs, commits, releases) loads after this response, so the
+    // charts fill in within minutes rather than at the next cron run; a load cut short (a redeploy)
+    // is picked up by the cron runs, which resume from the saved cursors.
+    const eventsLoading = (await getState(backfilledKey(facts.full_name))) === null;
+    if (eventsLoading) {
+      after(async () => {
+        await runSyncJob("manual", facts.full_name);
+      });
+    }
     return NextResponse.json({
       repo: { id: repo.id, full_name: facts.full_name },
       created,
@@ -62,6 +73,7 @@ export async function POST(req: NextRequest) {
       snapshot: { id: snapshot.id, captured_at: snapshot.captured_at },
       history,
       historyWarning,
+      eventsLoading,
     });
   } catch (err) {
     if (err instanceof RepoNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });

@@ -47,6 +47,17 @@
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-gray: #a8a7a0;
+  /* Compare-page repos: their lines all cross, so every pair (not just neighbours) must stay apart.
+     Slots 1-6 pass the dataviz checks all-pairs (normal ΔE >= 17.5, CVD >= 9.3, >= 3:1 on the card);
+     7-8 are weaker against some of the first six. */
+  --repo-1: #2a78d6;
+  --repo-2: #df7703;
+  --repo-3: #037233;
+  --repo-4: #6a02d8;
+  --repo-5: #dd2da2;
+  --repo-6: #d0011a;
+  --repo-7: #008f83;
+  --repo-8: #a57400;
   /* shadcn chart slots point at the same validated series */
   --chart-1: var(--series-1);
   --chart-2: var(--series-2);
@@ -109,6 +120,15 @@
   --series-6: #008300;
   --series-7: #9085e9;
   --series-gray: #6b6a66;
+  /* all-pairs normal ΔE >= 16.5, CVD >= 8.8, >= 3:1 on the dark card */
+  --repo-1: #3987e5;
+  --repo-2: #e07204;
+  --repo-3: #3ea662;
+  --repo-4: #7836f5;
+  --repo-5: #ea31a6;
+  --repo-6: #d4052e;
+  --repo-7: #008c85;
+  --repo-8: #a67600;
   --ord-1: #9ec5f4;
   --ord-2: #6da7ec;
   --ord-3: #3987e5;

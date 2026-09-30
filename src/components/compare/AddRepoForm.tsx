@@ -15,6 +15,7 @@ interface AddResponse {
   counts?: { stars: number };
   history?: { days: number; months: number } | null;
   historyWarning?: string | null;
+  eventsLoading?: boolean;
 }
 
 /**
@@ -44,8 +45,9 @@ export function AddRepoForm() {
         : json.historyWarning
           ? ` ${json.historyWarning}`
           : " No Trendshift link, so its star history starts with today's reading.";
+      const events = json.eventsLoading ? " Its forks, issues, PRs, commits and releases are loading in the background; reload in a few minutes (Status shows the run)." : "";
       toast[json.historyWarning ? "warning" : "success"](json.created ? `Added ${json.repo.full_name}` : `${json.repo.full_name} is back on the page`, {
-        description: `${stars}${history} Readings continue four times a day.`,
+        description: `${stars}${history}${events} Readings continue four times a day.`,
         duration: 8000,
       });
       setValue("");

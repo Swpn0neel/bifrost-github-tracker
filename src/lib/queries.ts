@@ -781,7 +781,7 @@ export function collectorRuns(limit = 40): Promise<CollectorRun[]> {
 /** True while a run started in the last 10 minutes has not finished (older stragglers were killed mid-run). */
 export async function runInProgress(): Promise<boolean> {
   const row = await queryOne<{ n: number }>(
-    "SELECT count(*)::int AS n FROM collector_runs WHERE finished_at IS NULL AND started_at > now() - interval '10 minutes'",
+    "SELECT count(*)::int AS n FROM collector_runs WHERE kind = 'snapshot' AND finished_at IS NULL AND started_at > now() - interval '10 minutes'",
   );
   return (row?.n ?? 0) > 0;
 }
