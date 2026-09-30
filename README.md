@@ -65,7 +65,7 @@ The event tables carry a `repo` column; rows without one belong to Bifrost. The 
 
 ## Sign-in
 
-Sign-in happens on the GTM Hub (https://hub.agitracker.io); the dashboard has no password of its own. The hub's session cookie is shared across `*.agitracker.io`, and `src/proxy.ts` asks the hub (`GET {HUB_URL}/api/sso/verify?app=github-tracker`) whether the visitor may use this dashboard, caching a yes for 60 seconds. Not signed in: pages redirect to the hub's login and come back; no access: to the hub's no-access page; `/api/*` answers 401/403 JSON instead. If the hub cannot be reached the dashboard fails closed with a 503. **Sign out** in the sidebar goes to the hub's sign-out page. `/api/health` stays public, and `/api/refresh` with the bearer `COLLECT_SECRET` skips the hub.
+Sign-in happens on the GTM Hub (https://hub.agitracker.io); the dashboard has no password of its own. The hub's session cookie is shared across `*.agitracker.io`, and `src/proxy.ts` asks the hub (`GET {HUB_URL}/api/sso/verify?app=github-tracker`) whether the visitor may use this dashboard, caching a yes for 60 seconds. Not signed in: pages redirect to the hub's login and come back; no access: to the hub's no-access page; `/api/*` answers 401/403 JSON instead. If the hub cannot be reached the dashboard fails closed with a 503. **Sign out** in the sidebar goes to the hub's sign-out page; it shows only when the dashboard is opened on its own, since inside the hub the hub's sidebar has it. `/api/health` stays public, and `/api/refresh` with the bearer `COLLECT_SECRET` skips the hub.
 
 | Variable | Default | |
 |---|---|---|

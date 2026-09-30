@@ -13,6 +13,7 @@ import { NavMain } from "./NavMain";
 import { SidebarBrand } from "./SidebarBrand";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
 import { SnapshotStatus } from "./SnapshotStatus";
+import { StandaloneOnly } from "./StandaloneOnly";
 
 interface AppSidebarProps {
   repo: string;
@@ -50,18 +51,20 @@ export function AppSidebar({ repo, updated, updatedTitle, next, email, signOutUr
                   </a>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild tooltip={email ? `Sign out ${email}` : "Sign out"}>
-                  {/* _top leaves the hub's iframe when the dashboard is shown inside it. */}
-                  <a href={signOutUrl} target="_top">
-                    <LogOut />
-                    <span className="sidebar-fade">
-                      Sign out
-                      {email && <span className="text-muted-foreground"> · {email}</span>}
-                    </span>
-                  </a>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {/* Inside the hub, its own sidebar has Sign out. */}
+              <StandaloneOnly>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild tooltip={email ? `Sign out ${email}` : "Sign out"}>
+                    <a href={signOutUrl}>
+                      <LogOut />
+                      <span className="sidebar-fade">
+                        Sign out
+                        {email && <span className="text-muted-foreground"> · {email}</span>}
+                      </span>
+                    </a>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </StandaloneOnly>
             </SidebarMenu>
           </SidebarFooter>
         </div>
