@@ -16,6 +16,7 @@ import {
   latestRepoSnapshot,
   latestSnapshot,
   repoDayCloseSnapshots,
+  starsAtDayClose,
   type CountsRow,
   type DailyPoint,
   type RepoSnapshotRow,
@@ -400,4 +401,34 @@ export async function comparedRepo(repo: TrackedRepo, to: string): Promise<Compa
 export async function comparedRepos(to: string): Promise<ComparedRepo[]> {
   const tracked = await listTrackedRepos();
   return Promise.all([comparedPrimary(to), ...tracked.map((r) => comparedRepo(r, to))]);
+}
+
+export interface StarGain {
+  /** Same key as the repo's Compare page series. */
+  key: string;
+  full_name: string;
+  primary: boolean;
+  gain: number | null;
+  /** The gain as a share of the total it started from. */
+  growth: number | null;
+}
+
+/**
+ * Stars gained since the close of the day `back` days before `to`, for the primary repo and then
+ * each tracked one in the Compare page's order (so colours line up): the same figures as that
+ * page's gain columns, read from star data alone so the Overview stays quick.
+ */
+export async function starGains(to: string, back: number): Promise<StarGain[]> {
+  const since = addDays(to, -back);
+  const row = (key: string, full_name: string, primary: boolean, live: number | null, then: number | null): StarGain => {
+    const gain = live === null || then === null ? null : live - then;
+    return { key, full_name, primary, gain, growth: gain === null || !then ? null : gain / then };
+  };
+  const tracked = await listTrackedRepos();
+  return Promise.all([
+    Promise.all([latestSnapshot(), starsAtDayClose(since)]).then(([latest, then]) => row("primary", env.repo, true, latest?.stars ?? null, then)),
+    ...tracked.map((r) =>
+      Promise.all([latestRepoSnapshot(r.id), starsAtDayClose(since, r.full_name)]).then(([latest, then]) => row(`repo-${r.id}`, r.full_name, false, latest?.stars ?? null, then)),
+    ),
+  ]);
 }

@@ -3,11 +3,12 @@
 import { useState, type ReactNode } from "react";
 import { Card } from "@/components/Card";
 import { TimeSeriesChart, type ChartSeries } from "@/components/TimeSeriesChart";
-import { formatInt } from "@/lib/format";
-import { formatDate, formatDateWithDay, formatMonth, formatShortDate } from "@/lib/time";
+import { fixed, formatInt } from "@/lib/format";
+import { rollingMean } from "@/lib/stats";
+import { addDays, formatDate, formatDateWithDay, formatMonth, formatShortDate } from "@/lib/time";
 import { periodEnd, trendDataStart, trendWindow, type MonthlyFill, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
 import { cn } from "@/lib/utils";
-import { RangeControls, useTrendRange, type PresetKey } from "./TrendControls";
+import { RangeControls, Segmented, useTrendRange, type PresetKey } from "./TrendControls";
 
 // Colour follows the metric, so hiding a line never repaints the ones that stay.
 const METRICS: { key: TrendMetric; label: string; color: string; defaultOn: boolean }[] = [
@@ -21,6 +22,9 @@ const METRICS: { key: TrendMetric; label: string; color: string; defaultOn: bool
 ];
 
 const TITLES: Record<TrendGroup, string> = { day: "Daily activity", week: "Weekly activity", month: "Monthly activity" };
+
+type View = "per" | "avg7";
+const AVG_WINDOW = 7;
 
 interface ActivityTrendsProps {
   /** One row per IST day, oldest first, with no gaps, ending today. */
@@ -42,8 +46,24 @@ export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset 
   const today = days[days.length - 1]?.date ?? "";
   const rangeState = useTrendRange(dataStart, today, defaultPreset, presets);
   const [hidden, setHidden] = useState<ReadonlySet<TrendMetric>>(() => new Set(METRICS.filter((m) => !m.defaultOn).map((m) => m.key)));
+  const [view, setView] = useState<View>("per");
+  const smoothing = group === "day" && view === "avg7";
 
+  // The chips always total the raw range; the lines may be a trailing average instead.
   const { rows, from, to } = trendWindow(days, rangeState.range.from, rangeState.range.to, group, monthly);
+  let chartRows = rows;
+  if (smoothing) {
+    // Read a week further back so the first days of the range have a full window behind them.
+    const wide = trendWindow(days, addDays(rangeState.range.from, -(AVG_WINDOW - 1)), rangeState.range.to, group, monthly).rows;
+    const means = Object.fromEntries(METRICS.map((m) => [m.key, rollingMean(wide.map((r) => r[m.key]), AVG_WINDOW)]));
+    chartRows = wide
+      .map((r, i) => {
+        const out = { ...r };
+        for (const m of METRICS) out[m.key] = means[m.key][i] === null ? null : Math.round((means[m.key][i] as number) * 10) / 10;
+        return out;
+      })
+      .filter((r) => r.date >= from);
+  }
   const last = rows[rows.length - 1];
   const partialLast = last !== undefined && periodEnd(last.date, group) >= today;
 
@@ -75,9 +95,22 @@ export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset 
     <Card
       contentClassName="flex flex-1 flex-col"
       title={TITLES[group]}
-      subtitle={`New stars, forks, issues, PRs and commits per ${group}, ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}
+      subtitle={`New stars, forks, issues, PRs and commits per ${group}${smoothing ? ", trailing 7-day average," : ""} ${from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`} (IST).`}
     >
       <RangeControls state={rangeState} current={{ from, to }} />
+      {group === "day" && (
+        <div className="mb-3">
+          <Segmented
+            label="View"
+            value={view}
+            options={[
+              { key: "per", label: "Per day" },
+              { key: "avg7", label: "7-day avg" },
+            ]}
+            onChange={setView}
+          />
+        </div>
+      )}
 
       <ul className="mb-4 flex flex-wrap content-start gap-1.5" aria-label="Metrics">
         {METRICS.map((m) => {
@@ -108,11 +141,21 @@ export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset 
         {visible.length === 0 ? (
           <div className="flex h-[300px] items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">Pick a metric above to draw its line.</div>
         ) : (
-          <TimeSeriesChart data={rows} series={visible} height={300} legend={false} partialLast={partialLast} formatX={formatX} formatXLong={formatXLong} />
+          <TimeSeriesChart
+            data={chartRows}
+            series={visible}
+            height={300}
+            legend={false}
+            partialLast={partialLast}
+            formatX={formatX}
+            formatXLong={formatXLong}
+            decimals={smoothing}
+            formatValue={smoothing ? (v) => fixed(v) : undefined}
+          />
         )}
 
         <p className="mt-3 text-xs text-pretty text-muted-foreground">
-          Click a metric to show or hide its line; its number is the total for the range.
+          Click a metric to show or hide its line; its number is the total for the range{smoothing ? ", not the average" : ""}.
           {partialLast && ` The dashed end is the ${group} still in progress.`}
           {starsNote && <> {starsNote}</>}
         </p>

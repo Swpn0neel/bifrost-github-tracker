@@ -426,8 +426,7 @@ export async function estimatedStarTotals(repo: string = env.repo): Promise<Map<
   const totals = new Map<string, number>();
   const first = await firstSnapshotFor(repo);
   if (!first) return totals;
-  const [close] = await dayClosesFor(repo, first.ist_date, first.ist_date);
-  const gains = await externalDailyStars("1970-01-01", first.ist_date, repo);
+  const [[close], gains] = await Promise.all([dayClosesFor(repo, first.ist_date, first.ist_date), externalDailyStars("1970-01-01", first.ist_date, repo)]);
   let total = close?.stars ?? first.stars;
   let day = first.ist_date;
   // The outside source cannot have the first reading's own day yet when the repo was added
@@ -442,6 +441,18 @@ export async function estimatedStarTotals(repo: string = env.repo): Promise<Map<
     totals.set(addDays(day, -1), total);
   }
   return totals;
+}
+
+/**
+ * A repo's star total at the close of IST day `date`, as the daily series has it: that day's
+ * close reading, else (before the first reading) the outside count-back; null when neither
+ * covers the day. Reads star data only, so it is cheap next to building the whole series.
+ */
+export async function starsAtDayClose(date: string, repo: string = env.repo): Promise<number | null> {
+  const [starEvents, [close]] = await Promise.all([hasStarEvents(repo), dayClosesFor(repo, date, date)]);
+  if (starEvents) return (await dailySeries(date, date, repo))[0]?.stars ?? null;
+  if (close) return close.stars;
+  return (await estimatedStarTotals(repo)).get(date) ?? null;
 }
 
 /**

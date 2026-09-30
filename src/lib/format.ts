@@ -23,6 +23,14 @@ export function pct(n: number | null | undefined, digits = 0): string {
   return `${(n * 100).toFixed(digits)}%`;
 }
 
+/** 0.052 -> "+5%", -0.3 -> "−30%"; with digits = 1, 0.0213 -> "+2.1%". */
+export function signedPct(n: number | null | undefined, digits = 0): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  const v = Number((n * 100).toFixed(digits));
+  if (v === 0) return "±0%";
+  return `${v > 0 ? "+" : "−"}${Math.abs(v).toFixed(digits)}%`;
+}
+
 export function daysLabel(n: number | null | undefined): string {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
   if (n < 1) return `${Math.round(n * 24)} h`;

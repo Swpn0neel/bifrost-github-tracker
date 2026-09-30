@@ -17,7 +17,7 @@ interface StatTileProps {
   upIsGood?: boolean | null;
   trend?: number[];
   hero?: boolean;
-  hint?: string;
+  hint?: ReactNode;
   /** Small decorative icon next to the label. */
   icon?: ReactNode;
 }

@@ -1,16 +1,19 @@
 import { CircleDot, Eye, GitFork, GitPullRequest, MessagesSquare, Rocket, Star, Users } from "lucide-react";
+import { Suspense } from "react";
 import { ActivityTrends } from "@/components/ActivityTrends";
 import { Card } from "@/components/Card";
 import { DataTable } from "@/components/DataTable";
+import { BusiestWindowCard, BusiestWindowCardSkeleton } from "@/components/overview/BusiestWindowCard";
+import { RivalsCard, RivalsCardSkeleton } from "@/components/overview/RivalsCard";
 import { PageHeader } from "@/components/PageHeader";
+import { Sparkline } from "@/components/Sparkline";
 import { StatTile } from "@/components/StatTile";
-import { TimeSeriesChart } from "@/components/TimeSeriesChart";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { env } from "@/lib/env";
-import { formatInt, signed } from "@/lib/format";
+import { fixed, formatInt, signed, signedPct } from "@/lib/format";
 import { dailySeries, dataStartDate, externalMonthlyStars, firstSnapshot, hasStarEvents, latestSnapshot, type DailyPoint } from "@/lib/queries";
-import { rollingMean, sumBy } from "@/lib/stats";
-import { addDays, formatDate, formatIstDateTime, istDate } from "@/lib/time";
+import { sumBy } from "@/lib/stats";
+import { addDays, formatDate, formatShortDate, istDate } from "@/lib/time";
 import { dailyTrend } from "@/lib/trends";
 
 export const dynamic = "force-dynamic";
@@ -69,28 +72,21 @@ export default async function OverviewPage() {
     starEvents || !first ? undefined : estimated ? (
       <>
         Star gains up to {formatDate(first.ist_date)} are estimates from {trendshift} (UTC days; months only before its daily record starts); after that they are the net change between our daily
-        snapshots.
+        snapshots, since GitHub does not expose the stargazer list to this token.
       </>
     ) : (
       `Star gains are the net change between daily snapshots, so they begin after the first snapshot on ${formatDate(first.ist_date)}.`
     );
-
-  const avg7 = rollingMean(
-    series.map((p) => (p.new_stars_known ? p.new_stars : null)),
-    7,
-  );
-  const newStarsData = series.map((p, i) => ({ date: p.date, new_stars: p.new_stars_known ? p.new_stars : null, avg7: avg7[i] === null ? null : Math.round(avg7[i] * 10) / 10 }));
-  const totalsData = series.map((p) => ({ date: p.date, stars: trusted(p) ? p.stars : null }));
 
   const thisWeek = series.slice(-7);
   const lastWeek = series.slice(-14, -7);
   const weekRows = WEEK_ROWS.map((r) => {
     const a = sumBy(thisWeek, (p) => Number(p[r.key]));
     const b = sumBy(lastWeek, (p) => Number(p[r.key]));
-    return { key: r.key, label: r.label, thisWeek: a, lastWeek: b, change: a - b };
+    return { key: r.key, label: r.label, thisWeek: a, lastWeek: b, change: a - b, changePct: b ? (a - b) / b : null, trend: series.slice(-14).map((p) => Number(p[r.key])) };
   });
-
-  const milestoneProgress = Math.min(1, Math.max(0, (stars - (milestone - 1000)) / 1000));
+  const watchers = latest?.watchers ?? cur.watchers;
+  const discussions = latest?.discussions ?? null;
 
   return (
     <div className="space-y-6">
@@ -120,15 +116,34 @@ export default async function OverviewPage() {
           deltaLabel="today so far"
           upIsGood
           trend={series.slice(-14).filter(trusted).map((p) => p.stars)}
-          hint={`${signed(gain7)} in 7 d · ${signed(gain30)} in 30 d`}
+          hint={
+            <>
+              {signed(gain7)} in 7 d · {signed(gain30)} in 30 d
+              {etaDays !== null && (
+                <span className="block">
+                  {fixed(perDay7)} a day, so {formatInt(milestone)} by ~{formatShortDate(addDays(today, etaDays))}
+                </span>
+              )}
+            </>
+          }
         />
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          <StatTile label="Forks" icon={<GitFork />} value={latest?.forks ?? cur.forks} delta={yday ? (latest?.forks ?? cur.forks) - yday.forks : null} deltaLabel="today" upIsGood />
-          <StatTile label="Watchers" icon={<Eye />} value={latest?.watchers ?? cur.watchers} delta={yday?.watchers != null && latest ? latest.watchers - yday.watchers : null} deltaLabel="today" upIsGood />
-          <StatTile label="Open issues" icon={<CircleDot />} value={latest?.open_issues ?? cur.open_issues} delta={yday ? (latest?.open_issues ?? cur.open_issues) - yday.open_issues : null} deltaLabel="today" />
-          <StatTile label="Open PRs" icon={<GitPullRequest />} value={latest?.open_prs ?? cur.open_prs} delta={yday ? (latest?.open_prs ?? cur.open_prs) - yday.open_prs : null} deltaLabel="today" />
-          <StatTile label="Contributors" icon={<Users />} value={latest?.contributors ?? cur.contributors} delta={week ? (latest?.contributors ?? cur.contributors) - week.contributors : null} deltaLabel="in 7 d" upIsGood />
-          <StatTile label="Discussions" icon={<MessagesSquare />} value={latest?.discussions ?? null} hint={latest?.discussions == null ? "Needs GITHUB_TOKEN" : undefined} />
+        <div className="flex flex-col gap-3">
+          <div className="grid flex-1 grid-cols-2 gap-4">
+            <StatTile label="Forks" icon={<GitFork />} value={latest?.forks ?? cur.forks} delta={yday ? (latest?.forks ?? cur.forks) - yday.forks : null} deltaLabel="today" upIsGood />
+            <StatTile label="Open issues" icon={<CircleDot />} value={latest?.open_issues ?? cur.open_issues} delta={yday ? (latest?.open_issues ?? cur.open_issues) - yday.open_issues : null} deltaLabel="today" />
+            <StatTile label="Open PRs" icon={<GitPullRequest />} value={latest?.open_prs ?? cur.open_prs} delta={yday ? (latest?.open_prs ?? cur.open_prs) - yday.open_prs : null} deltaLabel="today" />
+            <StatTile label="Contributors" icon={<Users />} value={latest?.contributors ?? cur.contributors} delta={week ? (latest?.contributors ?? cur.contributors) - week.contributors : null} deltaLabel="in 7 d" upIsGood />
+          </div>
+          <p className="flex flex-wrap gap-x-4 gap-y-1 px-1 text-xs text-muted-foreground tnum">
+            <span className="inline-flex items-center gap-1.5">
+              <Eye className="size-3.5" aria-hidden /> {formatInt(watchers)} watchers
+            </span>
+            {discussions !== null && (
+              <span className="inline-flex items-center gap-1.5">
+                <MessagesSquare className="size-3.5" aria-hidden /> {formatInt(discussions)} discussions
+              </span>
+            )}
+          </p>
         </div>
       </div>
 
@@ -140,88 +155,41 @@ export default async function OverviewPage() {
         {starsNote && <p className="px-1 text-xs text-pretty text-muted-foreground">{starsNote}</p>}
       </section>
 
+      {/* These two read more data; they stream in so the rest of the page is not held up. */}
       <div className="grid gap-4 xl:grid-cols-2">
-        <Card
-          title="Stars, last 30 days"
-          subtitle={
-            !first ? "No snapshots yet" : starEvents ? `Snapshots since ${formatDate(first.ist_date)}; earlier days reconstructed from star timestamps` : estimated ? (
-              <>Snapshots since {formatDate(first.ist_date)}; earlier days counted back from the first snapshot using {trendshift}&apos;s daily star gains (estimate)</>
-            ) : (
-              `Snapshots since ${formatDate(first.ist_date)}; no star history before that (GitHub does not expose the stargazer list to this token)`
-            )
-          }
-        >
-          <TimeSeriesChart data={totalsData} series={[{ key: "stars", label: "Stars", color: "var(--series-1)", type: "area" }]} zeroBased={false} />
-        </Card>
-        <Card
-          title="New stars per day"
-          subtitle={
-            starEvents ? "Gross new stars by IST calendar day, with a trailing 7-day average" : (
-              <>
-                Net change between daily snapshots, with a trailing 7-day average. GitHub does not expose the stargazer list to this token
-                {estimated && first ? <>; days up to {formatDate(first.ist_date)} are estimates from {trendshift} (UTC days)</> : null}.
-              </>
-            )
-          }
-        >
-          <TimeSeriesChart
-            data={newStarsData}
-            series={[
-              { key: "new_stars", label: starEvents ? "New stars" : "Net new stars", color: "var(--series-1)", type: "bar" },
-              { key: "avg7", label: "7-day average", color: "var(--series-gray)", type: "line" },
-            ]}
-          />
-        </Card>
+        <Suspense fallback={<RivalsCardSkeleton />}>
+          <RivalsCard today={today} />
+        </Suspense>
+        <Suspense fallback={<BusiestWindowCardSkeleton />}>
+          <BusiestWindowCard today={today} />
+        </Suspense>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
-        <Card title="Pace" subtitle="Based on the last 7 days">
-          <dl className="grid grid-cols-2 gap-3">
-            {[
-              { term: "Stars per day", value: perDay7 === null ? "—" : perDay7.toFixed(1) },
-              { term: "Next milestone", value: formatInt(milestone) },
-              { term: "Stars to go", value: formatInt(milestone - stars) },
-              { term: "ETA at this pace", value: etaDays === null ? "—" : `${etaDays} d` },
-            ].map((item) => (
-              <div key={item.term} className="rounded-lg border bg-muted/40 px-3 py-2.5">
-                <dt className="text-xs text-muted-foreground">{item.term}</dt>
-                <dd className="mt-0.5 font-heading text-xl font-semibold tracking-tight text-foreground">{item.value}</dd>
-              </div>
-            ))}
-          </dl>
-          <div className="mt-4">
-            <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground tnum">
-              <span>{formatInt(milestone - 1000)}</span>
-              <span className="font-medium text-foreground">{Math.round(milestoneProgress * 100)}% of the way</span>
-              <span>{formatInt(milestone)}</span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`${formatInt(stars)} of ${formatInt(milestone)} stars`}>
-              <div className="h-full rounded-full bg-(--series-1)" style={{ width: `${milestoneProgress * 100}%` }} />
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-pretty text-muted-foreground">
-            Latest snapshot: {latest ? formatIstDateTime(latest.captured_at) : "none yet"}. Past days use their midnight IST reading; today follows the latest reading, so Refresh updates it too.
-          </p>
-        </Card>
-        <Card title="This week vs last week" subtitle="Rolling 7-day windows ending today (IST)">
-          <DataTable
-            rows={weekRows}
-            rowKey={(r) => r.key}
-            dense
-            columns={[
-              { key: "label", label: "Metric", render: (r) => <span className="font-medium">{r.label}</span> },
-              { key: "thisWeek", label: "This week", align: "right", render: (r) => formatInt(r.thisWeek) },
-              { key: "lastWeek", label: "Last week", align: "right", render: (r) => <span className="text-muted-foreground">{formatInt(r.lastWeek)}</span> },
-              {
-                key: "change",
-                label: "Change",
-                align: "right",
-                render: (r) => <span className={r.change > 0 ? "font-medium text-good" : r.change < 0 ? "font-medium text-bad" : "text-muted-foreground"}>{signed(r.change)}</span>,
-              },
-            ]}
-          />
-        </Card>
-      </div>
+      <Card title="This week vs last week" subtitle="Rolling 7-day windows ending today (IST); the trend line covers both weeks.">
+        <DataTable
+          rows={weekRows}
+          rowKey={(r) => r.key}
+          dense
+          columns={[
+            { key: "label", label: "Metric", className: "whitespace-nowrap", render: (r) => <span className="font-medium">{r.label}</span> },
+            { key: "trend", label: "Last 14 days", render: (r) => <Sparkline values={r.trend} className="h-6 w-28" /> },
+            { key: "thisWeek", label: "This week", align: "right", render: (r) => formatInt(r.thisWeek) },
+            { key: "lastWeek", label: "Last week", align: "right", render: (r) => <span className="text-muted-foreground">{formatInt(r.lastWeek)}</span> },
+            {
+              key: "change",
+              label: "Change",
+              align: "right",
+              render: (r) => <span className={r.change > 0 ? "font-medium text-good" : r.change < 0 ? "font-medium text-bad" : "text-muted-foreground"}>{signed(r.change)}</span>,
+            },
+            {
+              key: "changePct",
+              label: "%",
+              align: "right",
+              render: (r) => <span className={r.change > 0 ? "text-good" : r.change < 0 ? "text-bad" : "text-muted-foreground"}>{signedPct(r.changePct)}</span>,
+            },
+          ]}
+        />
+      </Card>
     </div>
   );
 }
