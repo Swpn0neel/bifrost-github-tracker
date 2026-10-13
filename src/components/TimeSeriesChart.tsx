@@ -38,6 +38,8 @@ interface TimeSeriesChartProps {
   partialLast?: boolean;
   /** Rows are weeks or months keyed by their first day, not days: ticks and tooltip headings say so. */
   period?: "day" | "week" | "month";
+  /** Label for a last tooltip row adding up every series in the row, for stacked bars. */
+  totalLabel?: string;
 }
 
 // A line's in-progress tail is plotted as a second, dashed line under this key.
@@ -51,6 +53,7 @@ interface TooltipProps {
   series: ChartSeries[];
   formatXLong: (v: string) => string;
   formatValue: (v: number) => string;
+  totalLabel?: string;
 }
 
 function Swatch({ series }: { series: ChartSeries }) {
@@ -58,25 +61,32 @@ function Swatch({ series }: { series: ChartSeries }) {
   return <span className={isLine ? "inline-block h-0.5 w-3.5 shrink-0 rounded-sm" : "inline-block size-2.5 shrink-0 rounded-[2px]"} style={{ background: series.color }} />;
 }
 
-function ChartTooltipBody({ active, label, payload, series, formatXLong, formatValue }: TooltipProps) {
+function ChartTooltipBody({ active, label, payload, series, formatXLong, formatValue, totalLabel }: TooltipProps) {
   if (!active || !payload?.length) return null;
   const byKey = new Map(payload.map((p) => [String(p.dataKey), p.value]));
+  const values = series.map((s) => {
+    const raw = byKey.get(s.key) ?? byKey.get(tailKey(s.key));
+    return typeof raw === "number" ? raw : null;
+  });
+  const known = values.filter((v) => v !== null);
   return (
     <div className="grid min-w-36 gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
       <div className="font-medium text-foreground">{formatXLong(String(label ?? ""))}</div>
       <div className="grid gap-1.5">
-        {series.map((s) => {
-          const raw = byKey.get(s.key) ?? byKey.get(tailKey(s.key));
-          const value = typeof raw === "number" ? formatValue(raw) : "—";
-          return (
-            <div key={s.key} className="flex items-center gap-2 leading-none">
-              <Swatch series={s} />
-              <span className="text-muted-foreground">{s.label}</span>
-              <span className="ml-auto pl-3 font-mono font-medium text-foreground tnum">{value}</span>
-            </div>
-          );
-        })}
+        {series.map((s, i) => (
+          <div key={s.key} className="flex items-center gap-2 leading-none">
+            <Swatch series={s} />
+            <span className="text-muted-foreground">{s.label}</span>
+            <span className="ml-auto pl-3 font-mono font-medium text-foreground tnum">{values[i] === null ? "—" : formatValue(values[i])}</span>
+          </div>
+        ))}
       </div>
+      {totalLabel && (
+        <div className="flex items-center gap-2 border-t border-border/50 pt-1.5 leading-none">
+          <span className="font-medium text-foreground">{totalLabel}</span>
+          <span className="ml-auto pl-3 font-mono font-medium text-foreground tnum">{known.length ? formatValue(known.reduce((a, b) => a + b, 0)) : "—"}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -98,6 +108,7 @@ export function TimeSeriesChart({
   legend = true,
   partialLast = false,
   period = "day",
+  totalLabel,
 }: TimeSeriesChartProps) {
   const monthLabel = (v: string) => formatMonth(v.slice(0, 7));
   const tickLabel = period === "month" ? monthLabel : formatX;
@@ -167,7 +178,7 @@ export function TimeSeriesChart({
           />
           <ChartTooltip
             cursor={hasBars ? { fill: "var(--muted)", fillOpacity: 0.7 } : { stroke: "var(--axis)", strokeWidth: 1 }}
-            content={<ChartTooltipBody series={series} formatXLong={heading} formatValue={formatValue} />}
+            content={<ChartTooltipBody series={series} formatXLong={heading} formatValue={formatValue} totalLabel={totalLabel} />}
             isAnimationActive={false}
           />
           {series.map((s) => {

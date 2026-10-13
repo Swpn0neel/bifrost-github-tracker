@@ -175,6 +175,7 @@ export default async function TimeOfDayPage({ searchParams }: { searchParams: Pr
           data={chartRows}
           period={period}
           height={280}
+          totalLabel={period === "day" ? "Day total" : period === "week" ? "Week total" : "Month total"}
           series={SLOTS.map((slot, i) => ({ key: `s${slot}`, label: SLOT_WINDOWS[slot], color: ORD[i], type: "bar" as const, stackId: "day" }))}
         />
       </Card>
