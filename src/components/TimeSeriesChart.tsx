@@ -40,6 +40,14 @@ interface TimeSeriesChartProps {
   period?: "day" | "week" | "month";
   /** Label for a last tooltip row adding up every series in the row, for stacked bars. */
   totalLabel?: string;
+  /** Values the row on `date` is projected to end at, shown in brackets after its own values in the tooltip; `note` explains the brackets. */
+  projection?: Projection;
+}
+
+export interface Projection {
+  date: string;
+  values: Record<string, number | undefined>;
+  note: string;
 }
 
 // A line's in-progress tail is plotted as a second, dashed line under this key.
@@ -54,6 +62,7 @@ interface TooltipProps {
   formatXLong: (v: string) => string;
   formatValue: (v: number) => string;
   totalLabel?: string;
+  projection?: Projection;
 }
 
 function Swatch({ series }: { series: ChartSeries }) {
@@ -61,7 +70,7 @@ function Swatch({ series }: { series: ChartSeries }) {
   return <span className={isLine ? "inline-block h-0.5 w-3.5 shrink-0 rounded-sm" : "inline-block size-2.5 shrink-0 rounded-[2px]"} style={{ background: series.color }} />;
 }
 
-function ChartTooltipBody({ active, label, payload, series, formatXLong, formatValue, totalLabel }: TooltipProps) {
+function ChartTooltipBody({ active, label, payload, series, formatXLong, formatValue, totalLabel, projection }: TooltipProps) {
   if (!active || !payload?.length) return null;
   const byKey = new Map(payload.map((p) => [String(p.dataKey), p.value]));
   const values = series.map((s) => {
@@ -69,6 +78,8 @@ function ChartTooltipBody({ active, label, payload, series, formatXLong, formatV
     return typeof raw === "number" ? raw : null;
   });
   const known = values.filter((v) => v !== null);
+  const projected = projection && projection.date === String(label) ? projection.values : undefined;
+  const hasProjection = projected !== undefined && series.some((s, i) => values[i] !== null && projected[s.key] !== undefined);
   return (
     <div className="grid min-w-36 gap-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
       <div className="font-medium text-foreground">{formatXLong(String(label ?? ""))}</div>
@@ -77,10 +88,14 @@ function ChartTooltipBody({ active, label, payload, series, formatXLong, formatV
           <div key={s.key} className="flex items-center gap-2 leading-none">
             <Swatch series={s} />
             <span className="text-muted-foreground">{s.label}</span>
-            <span className="ml-auto pl-3 font-mono font-medium text-foreground tnum">{values[i] === null ? "—" : formatValue(values[i])}</span>
+            <span className="ml-auto pl-3 font-mono font-medium text-foreground tnum">
+              {values[i] === null ? "—" : formatValue(values[i])}
+              {values[i] !== null && projected?.[s.key] !== undefined && <span className="font-normal text-muted-foreground"> (~{formatInt(projected[s.key])})</span>}
+            </span>
           </div>
         ))}
       </div>
+      {hasProjection && <div className="max-w-56 border-t border-border/50 pt-1.5 text-pretty text-muted-foreground">{projection?.note}</div>}
       {totalLabel && (
         <div className="flex items-center gap-2 border-t border-border/50 pt-1.5 leading-none">
           <span className="font-medium text-foreground">{totalLabel}</span>
@@ -109,6 +124,7 @@ export function TimeSeriesChart({
   partialLast = false,
   period = "day",
   totalLabel,
+  projection,
 }: TimeSeriesChartProps) {
   const monthLabel = (v: string) => formatMonth(v.slice(0, 7));
   const tickLabel = period === "month" ? monthLabel : formatX;
@@ -178,7 +194,7 @@ export function TimeSeriesChart({
           />
           <ChartTooltip
             cursor={hasBars ? { fill: "var(--muted)", fillOpacity: 0.7 } : { stroke: "var(--axis)", strokeWidth: 1 }}
-            content={<ChartTooltipBody series={series} formatXLong={heading} formatValue={formatValue} totalLabel={totalLabel} />}
+            content={<ChartTooltipBody series={series} formatXLong={heading} formatValue={formatValue} totalLabel={totalLabel} projection={projection} />}
             isAnimationActive={false}
           />
           {series.map((s) => {

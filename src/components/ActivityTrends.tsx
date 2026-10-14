@@ -2,11 +2,11 @@
 
 import { useState, type ReactNode } from "react";
 import { Card } from "@/components/Card";
-import { TimeSeriesChart, type ChartSeries } from "@/components/TimeSeriesChart";
+import { TimeSeriesChart, type ChartSeries, type Projection } from "@/components/TimeSeriesChart";
 import { fixed, formatInt } from "@/lib/format";
 import { rollingMean } from "@/lib/stats";
 import { addDays, formatDate, formatDateWithDay, formatMonth, formatShortDate } from "@/lib/time";
-import { periodEnd, trendDataStart, trendWindow, type MonthlyFill, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
+import { periodEnd, projectPeriod, trendDataStart, trendWindow, type MonthlyFill, type TrendGroup, type TrendMetric, type TrendRow } from "@/lib/trends";
 import { cn } from "@/lib/utils";
 import { RangeControls, Segmented, useTrendRange, type PresetKey } from "./TrendControls";
 
@@ -66,6 +66,11 @@ export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset 
   }
   const last = rows[rows.length - 1];
   const partialLast = last !== undefined && periodEnd(last.date, group) >= today;
+  // Hovering the period still in progress also shows where it would end at its pace so far.
+  const projection: Projection | undefined =
+    partialLast && group !== "day" && !smoothing
+      ? { date: last.date, values: projectPeriod(days, last.date, group), note: `In brackets: the ${group}-end projection at the pace of its whole days so far.` }
+      : undefined;
 
   const toggle = (key: TrendMetric) =>
     setHidden((prev) => {
@@ -151,6 +156,7 @@ export function ActivityTrends({ days, monthly, starsNote, group, defaultPreset 
             formatXLong={formatXLong}
             decimals={smoothing}
             formatValue={smoothing ? (v) => fixed(v) : undefined}
+            projection={projection}
           />
         )}
 

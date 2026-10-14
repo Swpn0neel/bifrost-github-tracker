@@ -40,6 +40,29 @@ export function periodEnd(date: string, group: TrendGroup): string {
   return addDays(monthStart(date, 1), -1);
 }
 
+/**
+ * Where the period starting on `start` would end if the rest of it kept the pace of its whole days so far.
+ * `days` must end today; today is still being counted, so it is left out of the pace, and the
+ * projection never drops below what is already in. A metric with an unknown day gets no projection,
+ * and neither does a period before its first whole day is over or one that began before the data.
+ */
+export function projectPeriod(days: TrendRow[], start: string, group: TrendGroup): Partial<Record<TrendMetric, number>> {
+  const firstDay = days[0]?.date;
+  if (!firstDay || start < firstDay) return {};
+  const inPeriod = days.slice(daysBetween(firstDay, start));
+  const whole = inPeriod.slice(0, -1);
+  if (whole.length === 0) return {};
+  const length = daysBetween(start, periodEnd(start, group)) + 1;
+  const out: Partial<Record<TrendMetric, number>> = {};
+  for (const m of TREND_METRICS) {
+    if (inPeriod.some((r) => r[m] === null)) continue;
+    const wholeTotal = whole.reduce((acc, r) => acc + (r[m] as number), 0);
+    const soFar = wholeTotal + (inPeriod[inPeriod.length - 1][m] as number);
+    out[m] = Math.max(soFar, Math.round((wholeTotal / whole.length) * length));
+  }
+  return out;
+}
+
 export interface TrendWindow {
   rows: TrendRow[];
   /** The days actually covered, after widening to whole periods and clamping to the data. */
